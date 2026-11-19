@@ -4497,3 +4497,10 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       (`state/ssgroup.out`: those left out, so new members join).  `tests/fake_ssgroup.py`: the second speaker's
       arguments, its avahi record, both players 1 ms apart, leave out and take back, the button.  Open on the Echos:
       two Soloists' memory and CPU on the Dot 2 (the second one idles until picked).
+- [~] **Echo Input with a new eMMC: no mic calibration, 2026-11-19.**  The tester's cupcake (eMMC replaced: idme empty)
+      heard nothing: the HAL's ASR pipeline logged "checkMiccal: ERROR! micCals[1..3]=0! PLEASE CHECK IDME MIC VALUE!"
+      and gave exact zeros (capture dump: peak 1, -96 dBFS), while the mics were fine (tinycap on TDM_Capture, 4 ch:
+      speech at -50 dBFS, the room at -75).  `audio_android.c` now reopens the capture as UNPROCESSED (no ASP
+      pipeline) after 3 s of nothing but |x| <= 1, for the rest of the run: a voice without beamformer or echo
+      canceller.  Open on it: the wake word and STT through the unprocessed path; better, idme's mic values written
+      back (format and factory values unknown).
