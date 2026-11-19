@@ -271,6 +271,17 @@ fn spawn_soloist(o: &Opts, sh: &Arc<Shared>) -> Result<Child, String> {
     let ev_w_raw = ev_w.as_raw_fd();
     let audio = o.audio_fd;
     let ws = format!("127.0.0.1:{}", o.ws_port);
+    // Soloist seals its stored login with its device id (/etc/machine-id): one kept under another id ("Empty
+    // device_id; refusing to decrypt") left it neither logged in nor waiting for the app.  A new id: a fresh start
+    let mid = std::fs::read_to_string("/etc/machine-id").unwrap_or_default().trim().to_string();
+    let seen = o.dir.join("machine-id");
+    if std::fs::read_to_string(&seen).unwrap_or_default().trim() != mid {
+        if o.dir.join("data").exists() {
+            log::info!("Soloist: a new device id, its stored login forgotten (pick the Echo in the app again)");
+        }
+        let _ = std::fs::remove_dir_all(o.dir.join("data"));
+        let _ = std::fs::write(&seen, &mid);
+    }
     for d in ["data", "cache"] {
         let _ = std::fs::create_dir_all(o.dir.join(d));
     }

@@ -719,7 +719,9 @@ soloist_prep() {
     # One per Echo from its Wi-Fi MAC, the same across updates and resets
     local mac mid; mac=$(cat /sys/class/net/$WLAN/address 2>/dev/null)
     if [ -n "$mac" ]; then
-        mid=$(echo "hassmic soloist $mac" | md5sum); mid=${mid%% *}
+        mid=$(echo "hassmic soloist $mac" | md5sum 2>/dev/null); mid=${mid%% *}
+        # no md5sum (toybox without it): the MAC's own digits, padded to machine-id's 32
+        case "$mid" in ????????????????????????????????) ;; *) mid=$(echo "$mac" | tr -d ':'); mid="${mid}00000000000000000000"; mid=${mid%????????}; mid="68617373${mid}" ;; esac
         [ "$(cat $SOLRUN/machine-id 2>/dev/null)" = "$mid" ] ||
             { echo "$mid" > $SOLRUN/machine-id.new && chmod 644 $SOLRUN/machine-id.new && mv $SOLRUN/machine-id.new $SOLRUN/machine-id; echo "soloist: machine id from the Wi-Fi MAC"; }
     fi
