@@ -28,6 +28,8 @@ hmac = "0.12"
 sha1 = "0.10"
 base64 = "0.22"
 form_urlencoded = "1"
+flate2 = "1"
+libc = "0.2"
 
 # librespot-core with its hash cash on every core and fixed version strings: src/third_party/librespot-core/README.md
 [patch.crates-io]

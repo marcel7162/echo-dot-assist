@@ -80,6 +80,8 @@ FILES="$OUT/hassmic $OUT/runas $(ls $OUT/mixcap $OUT/mixplay $OUT/pryon_test $OU
 [ ! -f $OUT/libhmui.so ] || FILES="$FILES $OUT/libhmui.so scripts/device/screen.dex"
 # the Spotify Connect speaker where the model has it (device.mk SPOTIFY), as bundle.sh ships it
 [ ! -f $OUT/hassmic-spotify ] || FILES="$FILES $OUT/hassmic-spotify"
+# Spotify Soloist's runtime (device.mk SOLOIST), as bundle.sh ships it
+[ ! -f $OUT/libpulse.so.0 ] || FILES="$FILES $(for f in libpulse.so.0 ld-linux-armhf.so.3 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libresolv.so.2 libatomic.so.1 libgcc_s.so.1 ca-certificates.crt; do echo $OUT/$f; done)"
 # the wake word aligners, as bundle.sh ships them: hassmic reads them next to itself (sysinstall.sh leaves them out
 # where the partition has no room for them; TWRP's way has no such check)
 FILES="$FILES $(echo wakealign/*.wa wakealign/*.was)"

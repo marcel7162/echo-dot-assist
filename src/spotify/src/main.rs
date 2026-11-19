@@ -28,6 +28,7 @@
 //! Log lines go to stderr (hassmic's log).
 
 mod search;
+mod soloist;
 mod zeroconf;
 
 use std::fs::File;
@@ -63,10 +64,15 @@ struct Args {
     normalise: bool,
     volume: u16,
     audio_fd: i32,
+    engine: String,                     // "librespot" (this file), "soloist" (soloist.rs)
+    runtime: PathBuf,                   // soloist: the folder with glibc and libpulse.so.0 (hassmic's own)
+    soloist_key_file: PathBuf,          // soloist: the developer API key, a file (not in this process's command line)
+    ws_port: u16,
 }
 
 fn args() -> Args {
-    let mut a = Args { name: "Echo".into(), dir: PathBuf::from("."), port: 28933, device_id: String::new(), bitrate: Bitrate::Bitrate160, normalise: true, volume: 50, audio_fd: 3 };
+    let mut a = Args { name: "Echo".into(), dir: PathBuf::from("."), port: 28933, device_id: String::new(), bitrate: Bitrate::Bitrate160, normalise: true, volume: 50, audio_fd: 3,
+                       engine: "librespot".into(), runtime: PathBuf::from("."), soloist_key_file: PathBuf::new(), ws_port: 28937 };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let v = it.next().unwrap_or_default();
@@ -79,6 +85,10 @@ fn args() -> Args {
             "--normalise" => a.normalise = v != "0",
             "--volume" => a.volume = v.parse::<u16>().unwrap_or(50).min(100),
             "--audio-fd" => a.audio_fd = v.parse().unwrap_or(3),
+            "--engine" => a.engine = v,
+            "--runtime" => a.runtime = PathBuf::from(v),
+            "--soloist-key-file" => a.soloist_key_file = PathBuf::from(v),
+            "--ws-port" => a.ws_port = v.parse().unwrap_or(a.ws_port),
             _ => eprintln!("spotify: unknown option {k}"),
         }
     }
@@ -91,7 +101,7 @@ fn args() -> Args {
 }
 
 /// One line on stdout, whole: hassmic reads them as they come (LineWriter flushes at the newline)
-fn emit(line: &str) {
+pub(crate) fn emit(line: &str) {
     println!("{}", line.replace('\n', " "));
 }
 
@@ -160,7 +170,7 @@ impl Mixer for EchoMixer {
 /// The Echo's clock comes from Home Assistant only (clock.c): before it has, it says 1970, and every certificate of
 /// Spotify's is "not valid yet" to rustls, which ends each connection at once with nothing but "Connect" to show for
 /// it (2026-11-19, an Echo on a phone's hotspot without Home Assistant).  Before 2026 is no time of ours
-fn clock_ok() -> bool {
+pub(crate) fn clock_ok() -> bool {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() >= 1_767_225_600).unwrap_or(false)
 }
 
@@ -184,10 +194,39 @@ enum End {
     Lost(librespot_core::Error),
 }
 
+/// stdin on a thread of its own: its end means hassmic ended or restarted, and the speaker ends with it at once,
+/// whatever it is waiting for, Soloist with it.  Read only between awaits before, a speaker stuck connecting (an access
+/// point on 4070 that a network drops) outlived its hassmic and kept the zeroconf port from the next one (2026-11-19)
+fn stdin_lines() -> mpsc::UnboundedReceiver<String> {
+    let (line_tx, lines) = mpsc::unbounded_channel::<String>();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for l in std::io::stdin().lock().lines() {
+            match l {
+                Ok(l) => { if line_tx.send(l).is_err() { break; } }
+                Err(_) => break,
+            }
+        }
+        log::info!("hassmic is gone: ending");
+        soloist::end_child();
+        std::process::exit(0);
+    });
+    lines
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     let _ = log::set_logger(&Logger).map(|_| log::set_max_level(log::LevelFilter::Debug));
     let a = args();
+    if a.engine == "soloist" {
+        let key = std::fs::read_to_string(&a.soloist_key_file).map(|k| k.trim().to_string()).unwrap_or_default();
+        let o = soloist::Opts { runtime: a.runtime.clone(), dir: a.dir.clone(), key, name: a.name.clone(), volume: a.volume,
+                                ws_port: a.ws_port, zc_port: a.port, audio_fd: a.audio_fd };
+        let mut lines = stdin_lines();
+        soloist::run(o, &mut lines).await;
+        soloist::end_child();
+        return;
+    }
     let audio = unsafe { File::from_raw_fd(a.audio_fd) };
     // ap_port 443: Spotify's access points on 443 only (librespot's apresolve filters by it).  The first choice is
     // 4070, which networks that let only the web's ports out drop: the connection hung in SYN_SENT (2026-11-19)
@@ -206,21 +245,7 @@ async fn main() {
         std::process::exit(1);
     }
     emit("ready");
-    // stdin on a thread of its own: its end means hassmic ended or restarted, and the speaker ends with it at once,
-    // whatever it is waiting for.  Read only between awaits before, a speaker stuck connecting (an access point on
-    // 4070 that a network drops) outlived its hassmic and kept the zeroconf port from the next one (2026-11-19)
-    let (line_tx, mut lines) = mpsc::unbounded_channel::<String>();
-    std::thread::spawn(move || {
-        use std::io::BufRead;
-        for l in std::io::stdin().lock().lines() {
-            match l {
-                Ok(l) => { if line_tx.send(l).is_err() { break; } }
-                Err(_) => break,
-            }
-        }
-        log::info!("hassmic is gone: ending");
-        std::process::exit(0);
-    });
+    let mut lines = stdin_lines();
     let mut creds = cache.credentials();
     let audio = Arc::new(std::sync::Mutex::new(Some(audio)));
     let mut volume = a.volume;

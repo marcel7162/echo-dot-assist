@@ -413,7 +413,16 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   cancelled as a "stop"; a refusal (`result <cmd> fail ...`) plays `core_error_sound`.  Search: Web API `/v1/search`
   with login5's token (`search.rs` picks; `make unit-spotify_rs`).  Settings `spotify`, `spotify_voice`,
   `spotify_bitrate` (restarts it), `spotify_normalise` (restarts it); page card `spotifyCard`, `GET/POST /api/spotify`
-  (`name`, `logout`, `say <words>`).  PC: `HASSMIC_SPOTIFY` (the binary; tests: `tests/fake_spotify.py`), `HASSMIC_SPOT`
+  (`name`, `logout`, `say <words>`, `key <sealed>`).  Engine (setting `spotify_engine`, offered where Soloist's runtime
+  came with the build, `spotify_soloist_present`): Soloist (default; `soloist.rs`), Spotify's own headless Connect
+  client (glibc arm32, no redistribution: downloaded by hassmic-spotify into `state/spotify/soloist/`, again after
+  30 days) run as `ld-linux-armhf.so.3 --library-path <dir> --preload libpulse.so.0` with the glibc libs next to
+  hassmic (`GLIBC_LIBS`, the Makefile; device.mk `SOLOIST`); `src/soloist/hmpulse.c` is that libpulse: PCM to fd 3,
+  `HMPULSE_VOLUME=report` (the app's volume as "volume N" on an events fd, nothing attenuated), its zeroconf port fixed
+  to 28936 by a bind() interposer, `_exit` when hassmic's pipe end goes (`make unit-hmpulse`); control by `soloist ctl
+  -w 127.0.0.1:28937` (trace: state, track); the developer key `state/spotify/soloist.key` (0600, sealed from the page).
+  Root's `main.sh` `soloist_prep`: `cp15_barrier` 2 (else Soloist spins in the kernel's emulation), `/system/etc`'s
+  resolv.conf and CA bundle linked into `run/`.  Search with Soloist: not yet (`fail nosearch`).  PC: `HASSMIC_SOLOIST_RUNTIME`; `HASSMIC_SPOTIFY` (the binary; tests: `tests/fake_spotify.py`), `HASSMIC_SPOT`
   (its output file).  Builds byte for byte: paths remapped, SOURCE_DATE_EPOCH 0, VERGEN_IDEMPOTENT (content-id).
 - **Drop In** (`dropin.c`, `dropin.h`): calls between two Echos of the arbitration network. Signalling as signed
   `T_MSG` on arb's socket (`arb_tell`, `hooks->message`; invite/ringing/accept/refuse/bye), audio Opus 16 kHz 20 ms over
@@ -812,7 +821,7 @@ stock behaviour. `scripts/device/` holds on-device helpers (`lockdown.sh` firewa
 Firewall invariant: Amazon's daemons may only reach local addresses; hassmic itself may reach any address (it fetches
 TTS/media URLs from HA/MA). `otad`/`ace_otad` (firmware updates) must never get out. Inbound TCP and UDP are only admitted on
 16384–32767, so every listening port (26053 ESPHome, 16700 Wyoming, 28928 Sendspin, 28929 OTA, 28931 settings page, UDP 28930 arbitration)
-must stay in that range (UDP 28932 Drop In, TCP 28933 Spotify Connect's zeroconf too). Exceptions: UDP 2330 (Kiosk Satellite's fixed port), which `lockdown.sh` admits only while
+must stay in that range (UDP 28932 Drop In, TCP 28933 Spotify Connect's zeroconf, 28936 Soloist's too). Exceptions: UDP 2330 (Kiosk Satellite's fixed port), which `lockdown.sh` admits only while
 `state/config` says `arbitration_mode=kiosk` (`kiosk_state`), and, where device.conf has `KIOSK_PACKAGE` (and the board `kiosk`, for the settings), the app's own TCP 2324 and 6053 from private addresses while it is installed, and with `kiosk_dlna` on its DLNA renderer (`kiosk_dlna` in `lockdown.sh`: the TCP port of the app's own setting `flutter.ks.dlna.port`, read through `runas` as its user, while its uid listens there per `/proc/net/tcp*`; UDP 1900 to 239.255.255.250 only while its uid alone holds 1900; issue #109); its uid may also reach the internet unless `kiosk_internet` is off (`KSUID`). Ping (ICMP echo request) is admitted from the private
 and link-local ranges of `LOCAL4` only. A stock rule hassmic comes to depend on (INPUT or OUTPUT) goes into `keep`, worded as `iptables -S`
 prints it.

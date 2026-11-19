@@ -108,7 +108,7 @@ static int colour_actual(void)
 /* ---------------------------------------------------------------- the table */
 
 enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, TIMER_STOP_OTHERS, STOP_ENDS, MULTI_PRESS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, MUSIC_PAGE, SCR_AUTO, SCR_LEVEL, SCR_ADJUST, SCR_COLOUR, SCREEN_TEXT, SCREEN_HOLD, SCREEN_TIMERS, SCR_SLEEP, SCR_CLOCK, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WAKE_EVENTS, REQUEST_TEXT, RING_LIVE, WIFI_MOTION,
-          WIFI_SENS, LIGHT_SENSOR, BT_PROXY, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, CALL_MIC, UPDATES, HTTPS_VERIFY, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, KIOSK_DLNA, SS_UNPAIRED, SPOTIFY, SPOTIFY_VOICE, SPOTIFY_BITRATE, SPOTIFY_NORM, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, DUCK, DUCK_OTHERS, VOLUME, VOL_SPLIT,
+          WIFI_SENS, LIGHT_SENSOR, BT_PROXY, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, CALL_MIC, UPDATES, HTTPS_VERIFY, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, KIOSK_DLNA, SS_UNPAIRED, SPOTIFY, SPOTIFY_ENGINE, SPOTIFY_VOICE, SPOTIFY_BITRATE, SPOTIFY_NORM, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, DUCK, DUCK_OTHERS, VOLUME, VOL_SPLIT,
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET,
           VOL_EVEN, NSET };
@@ -236,6 +236,8 @@ static const struct setting table[NSET] = {
      * has it: device.mk SPOTIFY), spoken commands for it, librespot's quality and loudness normalisation.  No entities:
      * the login is the Spotify app's, the page shows it */
     [SPOTIFY]     = { "spotify", "Spotify Connect", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* which client plays: Spotify's Soloist (its runtime in this build) or librespot (spotify.c) */
+    [SPOTIFY_ENGINE] = { "spotify_engine", "Spotify client", "Music", NULL, S_CHOICE, 0, 0, 1, 0 },
     [SPOTIFY_VOICE] = { "spotify_voice", "Spotify by voice", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
     [SPOTIFY_BITRATE] = { "spotify_bitrate", "Spotify quality", "Music", "kbit/s", S_CHOICE, 0, 0, 1, 0 },
     [SPOTIFY_NORM] = { "spotify_normalise", "Spotify volume normalisation", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
@@ -288,6 +290,7 @@ static int present(enum id i)
     case CALL_MIC: return callmic_present() && dropin_running();
     case SS_UNPAIRED: return core_sendspin_port != 0;
     case SPOTIFY: case SPOTIFY_VOICE: case SPOTIFY_BITRATE: case SPOTIFY_NORM: return spotify_present();
+    case SPOTIFY_ENGINE: return spotify_present() && spotify_soloist_present();
     case SPK_GAIN: return spkgain_present();
     case MULTI_PRESS: return !board.action_combo;               /* the Shows: no action key, the volume pair stands in */
     case BAND: return ring_band_rows(-1) >= 0;
@@ -351,6 +354,7 @@ int settings_choices(const struct setting *s, const char *const **names)
     case MUSIC_PAGE: *names = music_pages; return 3;
     case TIMER_SOUND: *names = timer_sounds; return 4;
     case SPOTIFY_BITRATE: *names = spotify_bitrates; return 3;
+    case SPOTIFY_ENGINE: *names = spotify_engines; return 2;
     case END_REQ: *names = micend_names; return MICEND_MODES;
     default: *names = NULL; return 0;
     }
@@ -412,6 +416,7 @@ int settings_get(const struct setting *s)
     case SS_UNPAIRED: return sendspin_unpaired(-1);
     case SPOTIFY: return spotify_enable(-1);
     case SPOTIFY_VOICE: return spotify_voice(-1);
+    case SPOTIFY_ENGINE: return spotify_engine(-1);
     case SPOTIFY_BITRATE: return spotify_bitrate(-1);
     case SPOTIFY_NORM: return spotify_normalise(-1);
     case EQ_BASS: case EQ_MID: case EQ_TREBLE: return core_eq((int)(s - table) - EQ_BASS);
@@ -498,6 +503,7 @@ static void put(enum id i, int v)
     case SS_UNPAIRED: sendspin_unpaired(v); break;              /* sendspin.c keeps it */
     case SPOTIFY: spotify_enable(v); break;                     /* spotify.c: started or ended by its supervisor */
     case SPOTIFY_VOICE: spotify_voice(v); break;
+    case SPOTIFY_ENGINE: spotify_engine(v); break;              /* the speaker starts again with the other */
     case SPOTIFY_BITRATE: spotify_bitrate(v); break;            /* the daemon starts again with it */
     case SPOTIFY_NORM: spotify_normalise(v); break;
     case EQ_BASS: case EQ_MID: case EQ_TREBLE: core_set_eq(i - EQ_BASS, v); break;     /* the mixer keeps it */

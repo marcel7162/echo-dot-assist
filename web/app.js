@@ -269,6 +269,7 @@ const HELP = {
   bluetooth_announcement_language: { help: 'The language of those sentences. Home Assistant does not tell the Echo which language your voice assistant speaks, so pick the one that matches its voice.' },
   spotify: { help: 'The Echo as a Spotify Connect speaker, as Alexa had it: open Spotify on a phone or computer in the same network, tap the device icon and pick this Echo. The first time logs it in with your account (Spotify Premium is needed: Spotify lets no other account play on speakers); the login is kept on the Echo, so "Spiel Spotify" works afterwards without the app. Your password never reaches the Echo, only a key for this speaker that the app hands it. The music plays on the Echo\'s music volume, ducks under the assistant like Music Assistant\'s, and the action button pauses it. Whoever starts something last plays: Spotify pauses Music Assistant and Bluetooth, and they pause Spotify.' },
   spotify_voice: { parent: 'spotify', help: 'Sentences with "Spotify" in them go to Spotify instead of Home Assistant: "Spiel Spotify" (what you played last, here or anywhere, else your liked songs), "Spiel meine Lieblingssongs auf Spotify", "Spiel Queen auf Spotify", "Spiel die Playlist Chillout auf Spotify", "Spiel das Album Thriller auf Spotify", "Spiel Musik von Adele auf Spotify", the same in English ("Play Queen on Spotify"). While Spotify plays here, "Nächstes Lied", "Vorheriges Lied" and "Pause" are its too. The music starting is the answer; a falling two-tone means it could not (not logged in, nothing found): the card says why. Searches use Spotify\'s web API, which Spotify may limit for speakers like this one.' },
+  spotify_engine: { parent: 'spotify', help: 'Which program plays Spotify on the Echo. Soloist is Spotify\'s own client for speakers like this one: it plays for every Premium account, and needs a "Soloist API key" (below), which you make once in the Spotify for Developers dashboard (developer.spotify.com, signed in with your Premium account). The Echo downloads Soloist from Spotify itself and keeps it up to date (Spotify does not allow passing it on). librespot is the open-source client the Echo had first: no key needed, but Spotify refuses some accounts every song through it (newer ones, Duo among them), and then nothing plays. Changing it starts the speaker again; pick the Echo once more in the Spotify app.' },
   spotify_bitrate: { parent: 'spotify', help: 'Spotify\'s Ogg Vorbis quality. 320 kbit/s sounds best and uses about 145 MB an hour; 96 kbit/s suits a weak Wi-Fi. The speaker starts again when you change it.' },
   spotify_normalise: { parent: 'spotify', help: 'Plays every track at about the same loudness, as the Spotify app\'s "Normalise volume". The speaker starts again when you change it.' },
   sendspin_unpaired: { help: 'Lets any Music Assistant server on the network play here without pairing. Off: only a server given this Echo\'s "Sendspin pairing token" (a diagnostic entity in Home Assistant) may play.' },
@@ -483,8 +484,9 @@ const SUB = {
   sendspin_unpaired: 'Any Music Assistant server may play here',
   spotify: 'The Echo as a speaker in the Spotify app',
   spotify_voice: '"Spiel Spotify", "Spiel Queen auf Spotify"',
-  spotify_bitrate: 'Higher sounds better, lower needs less Wi-Fi',
-  spotify_normalise: 'Every track at about the same loudness',
+  spotify_engine: 'Spotify\'s own Soloist, or librespot',
+  spotify_bitrate: 'librespot only: higher sounds better, lower needs less Wi-Fi',
+  spotify_normalise: 'librespot only: every track at about the same loudness',
   https_verify: 'Checks the certificate of an HTTPS Home Assistant',
   kiosk_internet: 'Kiosk Satellite may reach the internet',
   kiosk_mic: 'Kiosk Satellite may use the microphone',
@@ -528,6 +530,7 @@ const CHOICE_NAMES = {
   call_mic: { call: 'Amazon\'s call processing', assistant: 'The assistant\'s' },
   music_on_screen: { off: 'Off', face: 'In place of the face', home: 'In place of the home app too' },
   spotify_bitrate: { 96: '96 kbit/s', 160: '160 kbit/s', 320: '320 kbit/s' },
+  spotify_engine: { soloist: 'Soloist (Spotify\'s own)', librespot: 'librespot' },
   timer_sound: { beep: 'Beep', timer: 'Alexa timer', alarm: 'Alexa alarm', custom: 'Your own' },
   end_of_request: { off: 'Off', relaxed: 'Relaxed', normal: 'Normal', aggressive: 'Aggressive' },
   bluetooth_announcement_language: { en: 'English', de: 'Deutsch', fr: 'Français', es: 'Español', it: 'Italiano', pt: 'Português', nl: 'Nederlands',
@@ -3020,9 +3023,13 @@ let spotCtl = null;
 // what came of the last spoken (or tried) command: src/spotify/src/main.rs "result"
 const SPOT_FAIL = { nologin: 'not logged in: pick the Echo once in the Spotify app', notfound: 'Spotify found nothing for it',
   error: 'Spotify did not answer (its web API may be limiting this speaker)', notrunning: 'the speaker was not running',
-  clock: 'the Echo\'s clock is not set yet (it comes from Home Assistant)' };
+  clock: 'the Echo\'s clock is not set yet (it comes from Home Assistant)',
+  nosearch: 'searching with Soloist is not there yet: "Spiel Spotify" and the app work' };
 // why no session comes up (src/spotify/src/main.rs "error"); the page's words
 const SPOT_ERR = { clock: 'The Echo\'s clock is not set: it comes from Home Assistant once the Echo is connected to it',
+  nokey: 'Soloist needs your API key: "Set key…" below',
+  download: 'Soloist could not be downloaded from Spotify: does the Echo reach the internet?',
+  start: 'Soloist would not start on this Echo (its log says why)', ended: 'Soloist keeps ending (its log says why)',
   unreachable: 'Spotify cannot be reached from the Echo: does its network let it out to the internet?',
   refused: 'Spotify refused the login: pick the Echo in the Spotify app again (Spotify Premium is needed)' };
 function spotResult(r) {
@@ -3051,10 +3058,25 @@ async function spotSend(body, ok) {
 function spotifyCard(list) {
   const main = list.find((s) => s.name === 'spotify'), rest = list.filter((s) => s !== main);
   const acct = h('div', { class: 'row-val' }), acctBtns = h('span', { class: 'btns' });
-  const nameVal = h('div', { class: 'row-val' });
+  const nameVal = h('div', { class: 'row-val' }), keyVal = h('div', { class: 'row-val' });
+  const keyRow = infoRow('Soloist API key', 'Lets Soloist play on this Echo', 'In the Spotify for Developers dashboard (developer.spotify.com, signed in with your Premium account), "Soloist API Key": make one and paste it here. It is sent sealed for this Echo and kept on it; the page never shows it again.',
+    h('span', { class: 'btns' }, h('button', { onclick: async () => {
+      const v = await ask({ title: 'Soloist API key', ok: 'Save', check: (x) => /^[\x21-\x7e]{8,200}$/.test(x) ? null : 'That does not look like a key',
+        body: ['Paste the key from the Spotify for Developers dashboard ("Soloist API Key"). The speaker starts again with it.'], input: { label: 'API key', value: '', max: 200 } });
+      if (v === null) return;
+      try {
+        state.spotify = (await echo.call('POST', '/api/spotify', (ctr) => {
+          const t = enc.encode(v), b = new Uint8Array(Math.ceil((t.length + 1) / 64) * 64); b.set(t);   // padded: its length stays inside
+          return `key ${hex(seal(echo.k, ctr, b))}`;
+        })).json();
+        toast('Saved: Soloist starts with it');
+      } catch (e) { toast(errText(e)); }
+      if (spotCtl) spotCtl.paint();
+    } }, 'Set key…')), null, keyVal);
   const tryIn = h('input', { type: 'text', id: 'spotify-try', placeholder: 'Spiel Queen auf Spotify' });
   const tried = h('p', { class: 'help' });
   const extra = h('div', { class: 'spot-extra' },
+    keyRow,
     h('div', { id: 'spotify-account' }, infoRow('Account', 'Who the speaker plays for, and what plays',
       'Open Spotify on a phone or computer in the same network as the Echo, tap the device icon (Spotify Connect) and pick this Echo by the name below: that logs it in with the account the app uses. Another account can take it over the same way. Log out forgets the login on the Echo; the Spotify app then shows it as a speaker to pick again.',
       acctBtns, null, acct)),
@@ -3086,6 +3108,8 @@ function spotifyCard(list) {
     acct.replaceChildren(what, h('span', { class: 'row-val-sub' }, sub.join(' · ')));
     acctBtns.replaceChildren(...[sp.logged_in ? h('button', { onclick: () => spotSend('logout', 'Logged out of Spotify') }, 'Log out') : null].filter(Boolean));
     nameVal.replaceChildren(sp.name || sp.default_name || '');
+    keyRow.classList.toggle('hidden', sp.engine !== 'soloist');
+    keyVal.replaceChildren(sp.has_key ? 'Set' : 'Not set yet');
   } };
   const card = titled('Spotify', main ? settingRow(main) : null, extra);
   spotCtl.paint();

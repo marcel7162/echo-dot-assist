@@ -1244,6 +1244,17 @@ static void handle(int fd)
         t[strcspn(t, "\r\n")] = 0;
         if (!strncmp(t, "name", 4) && (!t[4] || t[4] == ' ')) {
             if (spotify_set_name(t[4] ? t + 5 : "")) { respond_sjson(fd, &r, 400, "{\"error\":\"a name of up to 79 bytes, without < > &\"}"); free(r.body); return; }
+        } else if (!strncmp(t, "key ", 4)) {
+            /* Soloist's developer API key, sealed as the Wi-Fi password (plain HTTP; padded to 64 bytes); "-" removes it */
+            uint8_t sealed[130], k[131]; int kl = 0;
+            if (!strcmp(t + 4, "-")) kl = 0;
+            else if ((kl = unhex_any(sealed, sizeof sealed, t + 4)) <= 0 || unseal(&r, sealed, (size_t)kl, k)) {
+                respond_sjson(fd, &r, 400, "{\"error\":\"bad request\"}"); free(r.body); return;
+            }
+            k[kl] = 0;
+            int bad = spotify_set_key(kl ? (const char *)k : "");
+            crypto_wipe(k, sizeof k); crypto_wipe(sealed, sizeof sealed);
+            if (bad) { respond_sjson(fd, &r, 400, "{\"error\":\"not an API key\"}"); free(r.body); return; }
         } else if (!strcmp(t, "logout")) spotify_logout();
         else if (!strncmp(t, "say ", 4)) {
             pthread_mutex_lock(&core_lock); int took = spotify_command(t + 4, ""); pthread_mutex_unlock(&core_lock);

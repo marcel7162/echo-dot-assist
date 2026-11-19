@@ -538,6 +538,30 @@ API pa_channel_map *pa_channel_map_init_stereo(pa_channel_map *m)
     return m;
 }
 
+/* ---------------------------------------------------------------- the end of hassmic is Soloist's end
+
+ * Soloist does not end when hassmic does (it reads no stdin); left running it would hold the zeroconf and WebSocket
+ * ports from the next hassmic (hassmic-spotify did, 2026-11-19).  With HMPULSE_FD (hassmic runs it), a thread waits
+ * on that pipe's write end: the reader gone, poll says POLLERR, and the process ends.  Preloaded, so from the start */
+#include <poll.h>
+static void *watch_thread(void *arg)
+{
+    int fd = (int)(long)arg;
+    for (;;) {
+        struct pollfd p = { fd, 0, 0 };                 /* no events asked: only POLLERR/POLLHUP come back */
+        int r = poll(&p, 1, -1);
+        if (r < 0 && errno == EINTR) continue;
+        if (r < 0 || p.revents & (POLLERR | POLLHUP | POLLNVAL)) { logf_("hassmic is gone: ending"); _exit(0); }
+    }
+    return NULL;
+}
+__attribute__((constructor)) static void hmpulse_init(void)
+{
+    const char *e = getenv("HMPULSE_FD");
+    pthread_t t;
+    if (e && !pthread_create(&t, NULL, watch_thread, (void *)(long)atoi(e))) pthread_detach(t);
+}
+
 /* ---------------------------------------------------------------- bind(): zeroconf's port into the firewall's range */
 
 API int bind(int fd, const struct sockaddr *addr, socklen_t len)

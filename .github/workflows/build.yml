@@ -157,6 +157,12 @@ jobs:
             ~/.cargo/registry/cache
             build/cargo
           key: cargo-${{ matrix.device }}-${{ hashFiles('src/spotify/Cargo.lock', 'src/spotify/rust-toolchain.toml') }}
+      # Spotify Soloist's runtime (device.mk SOLOIST): glibc for 32-bit ARM and a libpulse of ours built against it
+      - name: Soloist runtime tools
+        if: matrix.device == 'donut'
+        run: |
+          grep -q '^SOLOIST' devices/${{ matrix.device }}/device.mk || exit 0
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf libc6-armhf-cross libatomic1-armhf-cross libgcc-s1-armhf-cross libpulse-dev
       - name: Build
         run: |
           make -j"$(nproc)" DEVICE=${{ matrix.device }} STUBS=1 RELEASE=1 all build/otatool-host
@@ -203,6 +209,10 @@ jobs:
             build/${{ matrix.device }}/libhmui.so
             build/${{ matrix.device }}/libhmled.so
             build/${{ matrix.device }}/hassmic-spotify
+            build/${{ matrix.device }}/libpulse.so.0
+            build/${{ matrix.device }}/ld-linux-armhf.so.3
+            build/${{ matrix.device }}/lib*.so.[0-9]
+            build/${{ matrix.device }}/ca-certificates.crt
           if-no-files-found: error
 
   test:

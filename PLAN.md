@@ -4436,3 +4436,22 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       desktop client id, platform and version, as librespot on a Raspberry Pi.  A login stored with the Android
       client id may need picking the Echo in the app once more.  Also: the speaker outlived a restarted hassmic while
       stuck connecting (port 28933 taken): stdin now on a thread of its own, its end exits the process.
+- [~] **Spotify's audio keys refused to librespot; Soloist instead, 2026-11-19.**  With the desktop client id too,
+      every track's key came back refused ("error audio key 0 1") on the user's Duo account: an account-level block of
+      librespot (librespot issue #1649), not the Echo.  Spotify's own headless Connect client, Soloist v1.3.10 (arm32,
+      glibc >= 2.38, dynamic; dlopens libpulse.so.0, 50 `pa_*` functions, PipeWire skipped; a build expires after 90
+      days; no redistribution), runs on the Dot 3: found in the app through its own mDNS beside avahi, logged in,
+      played through `src/soloist/hmpulse.c` (libpulse emulated: threaded mainloop, one stream, s16le stereo to an fd,
+      paced by the clock; CONNECTING/CREATING must be set synchronously, else "Unable to initialize AudioDriver").
+      Measured on the Echo: (1) with `/proc/sys/abi/cp15_barrier` at 1 (the kernel's emulation, logged) Soloist hung at
+      its first request, all of it system time: 2 (hardware) fixes it, root's `soloist_prep`; (2) glibc's resolver
+      and OpenSSL want `/etc/resolv.conf` and `/etc/ssl/certs/ca-certificates.crt` (/etc = /system/etc): links into
+      `/data/local/hassmic/run/`, rewritten on address changes; (3) its zeroconf port is random: a bind() interposer
+      in the shim gives it 28936 (inbound range).  Integrated (stage 2a): setting `spotify_engine` (Soloist default
+      where the runtime came with the build), the developer key sealed from the page, hassmic-spotify downloads Soloist
+      (`soloist.rs`, librespot-core's HttpClient; refreshed after 30 days), starts it with `HMPULSE_VOLUME=report` (the
+      app's volume to the Echo's, shown on the ring; nothing attenuated twice), follows it by `soloist ctl trace`,
+      drives it by `ctl` (play/pause/next/prev/volume/activate; "Spiel Spotify" = activate + play, the liked songs =
+      `spotify:user:<u>:collection`).  Open: on the Echo, the download through HttpClient, whether Soloist attenuates
+      its PCM itself as well in report mode, one `ctl` process per command (cost), a login lost after 90 days' expiry.
+      Stage 2b: search with the owner's own developer app (client credentials, Web API `/v1/search`) -> `ctl play <uri>`.

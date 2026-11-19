@@ -72,7 +72,28 @@ BIN := $(OUT)/hassmic $(OUT)/runas $(OUT)/otatool $(if $(filter %screen.c,$(SCRE
        $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test)
 
 .DEFAULT_GOAL := all
-all: $(BIN) $(if $(SPOTIFY),$(OUT)/hassmic-spotify)
+
+# Spotify Soloist's runtime where device.mk has SOLOIST (src/soloist/README.md): Soloist's arm32 build is a glibc
+# program that dlopens PulseAudio.  glibc 2.39 from Ubuntu's armhf cross packages (LGPL; Soloist asks for 2.38), the
+# libpulse.so.0 of src/soloist/hmpulse.c built with that toolchain against PulseAudio's headers, and Ubuntu's CA
+# bundle.  Flat beside hassmic (the bundle has no folders): glibc's names (libc.so.6, ld-linux-armhf.so.3) are not
+# bionic's.  Needs: gcc-arm-linux-gnueabihf libc6-armhf-cross libatomic1-armhf-cross libgcc-s1-armhf-cross libpulse-dev
+GLIBC_ARMHF := /usr/arm-linux-gnueabihf/lib
+GLIBC_LIBS  := ld-linux-armhf.so.3 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libresolv.so.2 libatomic.so.1 libgcc_s.so.1
+SOLOIST_RT  := $(OUT)/libpulse.so.0 $(addprefix $(OUT)/,$(GLIBC_LIBS)) $(OUT)/ca-certificates.crt
+$(OUT)/libpulse.so.0: src/soloist/hmpulse.c
+	@mkdir -p $(OUT) build/soloist/inc
+	@[ -f /usr/include/pulse/pulseaudio.h ] && command -v arm-linux-gnueabihf-gcc > /dev/null || { echo "Soloist's runtime needs: sudo apt install gcc-arm-linux-gnueabihf libc6-armhf-cross libatomic1-armhf-cross libgcc-s1-armhf-cross libpulse-dev" >&2; exit 1; }
+	cp -r /usr/include/pulse build/soloist/inc/
+	arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -fPIC -shared -fvisibility=hidden -Ibuild/soloist/inc -Wl,-soname,libpulse.so.0 \
+	    -Wl,--build-id=none -ffile-prefix-map=$(CURDIR)=/src src/soloist/hmpulse.c -o $@ -lpthread -ldl -lm
+$(addprefix $(OUT)/,$(GLIBC_LIBS)): $(OUT)/%: $(GLIBC_ARMHF)/%
+	@mkdir -p $(OUT)
+	cp -L $< $@
+$(OUT)/ca-certificates.crt: /etc/ssl/certs/ca-certificates.crt
+	@mkdir -p $(OUT)
+	cp -L $< $@
+all: $(BIN) $(if $(SPOTIFY),$(OUT)/hassmic-spotify) $(if $(SOLOIST),$(SOLOIST_RT))
 
 # Spotify Connect's speaker (src/spotify/, spotify.c) where device.mk names a Rust target (SPOTIFY): cargo with the
 # NDK's clang as linker for the same API level as hassmic, Rust as src/spotify/rust-toolchain.toml pins it.  The same

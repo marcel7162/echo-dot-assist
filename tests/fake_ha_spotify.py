@@ -16,6 +16,7 @@ tmp = tempfile.mkdtemp()
 LOG, CTL, OUT, MDNS = (os.path.join(tmp, n) for n in ("spotify.log", "spotify.ctl", "spot.raw", "spotify.service"))
 open(CTL, "w").close()
 ENV = {"HASSMIC_SPOTIFY": os.path.join(ROOT, "tests", "fake_spotify.py"), "FAKE_SPOTIFY_LOG": LOG, "FAKE_SPOTIFY_CTL": CTL,
+       "HASSMIC_SOLOIST_RUNTIME": os.path.join(tmp, "rt"),            # Soloist's runtime "in the build": the setting is offered
        "FAKE_SPOTIFY_USER": "tester", "HASSMIC_SPOT": OUT, "HASSMIC_SPOTIFY_MDNS": MDNS}
 
 
@@ -37,6 +38,9 @@ async def main(e):
           "the settings are there, Spotify off by default")
     await asyncio.sleep(1)
     check(not args() and not os.path.exists(MDNS) and not sp()["running"], "off: no speaker running, no mDNS record")
+
+    check(names.get("spotify_engine", {}).get("value") == 0, "Soloist's runtime came with the build: Soloist is the default client")
+    page.set(spotify_engine="librespot")    # librespot first: no runtime to run here; Soloist's start is checked below
 
     # on: started with the Echo's name, the zeroconf port, a device id; announced
     page.set(spotify="on")
@@ -109,6 +113,23 @@ async def main(e):
     check(sp()["name"] == "Wohnzimmer" and opt["--device-id"] == dict(zip(args()[1][0::2], args()[1][1::2]))["--device-id"], "  the same device id: the app keeps one entry for it")
     st, _, _ = page.call("POST", "/api/spotify", b"name <b>")
     check(st == 400, "a name with markup is refused")
+
+    # Soloist: the key sealed from the page, kept 0600; the speaker started again as Soloist, with the key's file and its
+    # own ports, and no avahi record (Soloist announces itself)
+    page.set(spotify_engine="soloist")
+    def sealed_key(ctr): return b"key " + page.seal(ctr, b"spak_testkey123".ljust(64, b"\0")).hex().encode()
+    st, _, _ = page.call("POST", "/api/spotify", sealed_key)
+    kf = os.path.join(e.state, "spotify", "soloist.key")
+    check(st == 200 and os.path.exists(kf) and open(kf).read() == "spak_testkey123" and oct(os.stat(kf).st_mode & 0o777) == "0o600",
+          "the Soloist API key: unsealed, kept 0600")
+    sol = lambda: [x for x in args() if "--engine" in x and x[x.index("--engine") + 1] == "soloist"]
+    check(await until(lambda: sol(), 8), "the speaker starts again as Soloist")
+    o2 = dict(zip(sol()[-1][0::2], sol()[-1][1::2])) if sol() else {}
+    check(o2.get("--soloist-key-file") == kf and o2.get("--port") == "28936" and o2.get("--ws-port") == "28937" and o2.get("--runtime", "").endswith("rt")
+          and o2.get("--dir", "").endswith("spotify/soloist"), f"  with the key's file, its ports and runtime ({o2})")
+    check(await until(lambda: not os.path.exists(MDNS), 3) and sp()["engine"] == "soloist" and sp()["has_key"] == 1, "  no avahi record: Soloist announces itself")
+    page.set(spotify_engine="librespot")
+    check(await until(lambda: os.path.exists(MDNS), 8), "back to librespot: announced by avahi again")
 
     # logout
     await until(lambda: sp()["running"] and sp()["logged_in"], 5)

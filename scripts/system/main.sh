@@ -695,6 +695,36 @@ wifi_awake() {
 }
 
 # While the settings page switches networks (wifi.sh holds its lock), the link is that script's business: no wifisvc.
+# Spotify Soloist (src/soloist/README.md: Spotify's own Connect client, which hassmic runs where the build brings its
+# runtime, libpulse.so.0 next to it) is a glibc program: glibc's resolver reads /etc/resolv.conf, which Android has
+# none of (bionic asks netd), and Soloist's curl /etc/ssl/certs/ca-certificates.crt.  /etc is /system/etc: two links
+# there, made once on the system partition, into root's /data/local/hassmic/run/, which this keeps up to date: the DNS
+# server DHCP gave, at every satellite start and new address; the certificates of the running build.  And the CPU
+# executes the CP15 barriers of Soloist's ARMv6-compatible build itself: the kernel's emulation (1, the default for
+# 32-bit programs on an arm64 kernel) traps each, and Soloist spun for minutes in it (2026-11-19, Echo Dot 3).
+SOLRUN=/data/local/hassmic/run
+soloist_prep() {
+    [ -f $D/libpulse.so.0 ] || return 0
+    [ -w /proc/sys/abi/cp15_barrier ] && echo 2 > /proc/sys/abi/cp15_barrier
+    mkdir -p $SOLRUN; chmod 755 $SOLRUN
+    local dns; dns=$(getprop net.dns1); [ -n "$dns" ] || dns=$(getprop dhcp.$WLAN.dns1)
+    if [ -n "$dns" ] && [ "$(cat $SOLRUN/resolv.conf 2>/dev/null)" != "nameserver $dns" ]; then
+        echo "nameserver $dns" > $SOLRUN/resolv.conf.new && chmod 644 $SOLRUN/resolv.conf.new && mv $SOLRUN/resolv.conf.new $SOLRUN/resolv.conf
+        echo "soloist: DNS $dns for glibc"
+    fi
+    cmp -s $D/ca-certificates.crt $SOLRUN/ca-certificates.crt ||
+        { cp $D/ca-certificates.crt $SOLRUN/ca.new && chmod 644 $SOLRUN/ca.new && mv $SOLRUN/ca.new $SOLRUN/ca-certificates.crt; }
+    [ "$(readlink /system/etc/resolv.conf)" = $SOLRUN/resolv.conf ] && [ "$(readlink /system/etc/ssl/certs/ca-certificates.crt)" = $SOLRUN/ca-certificates.crt ] && return 0
+    $D/otatool remount rw /system/etc || { echo "soloist: cannot remount /system for /etc's links"; return 0; }
+    mkdir -p /system/etc/ssl/certs && chmod 755 /system/etc/ssl /system/etc/ssl/certs
+    rm -f /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt
+    ln -s $SOLRUN/resolv.conf /system/etc/resolv.conf; ln -s $SOLRUN/ca-certificates.crt /system/etc/ssl/certs/ca-certificates.crt
+    chcon -h u:object_r:system_file:s0 /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt 2>/dev/null
+    chcon u:object_r:system_file:s0 /system/etc/ssl /system/etc/ssl/certs 2>/dev/null
+    sync; $D/otatool remount ro /system/etc
+    echo "soloist: /etc/resolv.conf and /etc/ssl/certs/ca-certificates.crt link to $SOLRUN"
+}
+
 # Whenever the address changes, wifi.sh writes down which network the Echo is on, for the page: wpa_supplicant can also
 # move to another saved network by itself when the one it is on goes away.
 netwatch() {
@@ -711,7 +741,7 @@ netwatch() {
         fi
         if a=$(ifconfig $WLAN 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p'); [ -n "$a" ]; then
             miss=0
-            [ "$a" = "$addr" ] || { addr=$a; [ -f $D/wifi.sh ] && sh $D/wifi.sh status; }
+            [ "$a" = "$addr" ] || { addr=$a; [ -f $D/wifi.sh ] && sh $D/wifi.sh status; soloist_prep; }
             kmod
             wifi_awake
             [ -n "$WIFI_SERVICE" ] && [ "$(getprop init.svc.$WIFI_SERVICE)" = running ] && [ ! -d $WIFI/lock ] && { sleep 5; stop $WIFI_SERVICE; echo "netwatch: link up, $WIFI_SERVICE stopped"; }
@@ -1067,6 +1097,7 @@ satellite)
         led_frame
         ledc_ours && [ -z "$(pidof ledcontroller-hm)" ] && { echo "light ring: ledcontroller with libhmled.so"; ledc_start; }
         sh $D/alexa-off.sh; quiet
+        soloist_prep
         # Android models: with the screen off Android lets the SoC suspend once no wake lock is held (autosleep), and the
         # satellite must keep listening: a kernel wake lock of root's, for as long as the satellite runs
         [ -n "$WAKE_LOCK" ] && echo "$WAKE_LOCK" > /sys/power/wake_lock

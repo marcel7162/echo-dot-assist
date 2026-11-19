@@ -51,8 +51,14 @@
 #define FRAME 4                         /* s16 stereo */
 
 const char *const spotify_bitrates[3] = { "96", "160", "320" };
+/* Which client plays (src/soloist/README.md): Spotify's own Soloist, where the build brings its runtime (glibc and its
+ * libpulse next to hassmic); librespot refuses some accounts every track (its issue #1649).  Soloist needs a developer
+ * API key from the owner (spotify_set_key) and is downloaded from Spotify by hassmic-spotify */
+const char *const spotify_engines[2] = { "soloist", "librespot" };
+#define SOLOIST_ZC_PORT 28936           /* its zeroconf listener, put in the firewall's range by its libpulse's bind() */
+#define SOLOIST_WS_PORT 28937           /* its WebSocket API, on 127.0.0.1 only */
 
-static _Atomic int enabled, bitrate = 1, normalise = 1, voice = 1;
+static _Atomic int enabled, bitrate = 1, normalise = 1, voice = 1, engine;
 static _Atomic int restart_now;         /* a setting the daemon starts with changed: end it, the loop starts it again */
 
 static pthread_mutex_t sl = PTHREAD_MUTEX_INITIALIZER;     /* what follows; never held while taking core_lock */
@@ -86,12 +92,44 @@ static const char *bin(void)
 
 int spotify_present(void) { const char *b = bin(); return b[0] && access(b, X_OK) == 0; }
 
+/* Soloist's runtime next to the speaker's binary (the bundle's flat folder) */
+static void runtime_dir(char *out, size_t cap)
+{
+    snprintf(out, cap, "%s", bin());
+    char *s = strrchr(out, '/');
+    if (s) *s = 0; else snprintf(out, cap, ".");
+}
+int spotify_soloist_present(void)
+{
+    char d[PATH_MAX], p[PATH_MAX + 32];
+    if (getenv("HASSMIC_SOLOIST_RUNTIME")) return 1;          /* tests */
+    runtime_dir(d, sizeof d); snprintf(p, sizeof p, "%s/libpulse.so.0", d);
+    return access(p, R_OK) == 0;
+}
+static int use_soloist(void) { return atomic_load(&engine) == 0 && spotify_soloist_present(); }
+
 /* ---------------------------------------------------------------- settings */
 
 int spotify_enable(int set) { if (set >= 0 && atomic_exchange(&enabled, set != 0) != (set != 0)) atomic_store(&restart_now, 1); return atomic_load(&enabled); }
 int spotify_bitrate(int set) { if (set >= 0 && set < 3 && atomic_exchange(&bitrate, set) != set) atomic_store(&restart_now, 1); return atomic_load(&bitrate); }
 int spotify_normalise(int set) { if (set >= 0 && atomic_exchange(&normalise, set != 0) != (set != 0)) atomic_store(&restart_now, 1); return atomic_load(&normalise); }
 int spotify_voice(int set) { if (set >= 0) atomic_store(&voice, set != 0); return atomic_load(&voice); }
+int spotify_engine(int set) { if (set >= 0 && set < 2 && atomic_exchange(&engine, set) != set) atomic_store(&restart_now, 1); return atomic_load(&engine); }
+
+static void key_path(char *out, size_t cap) { snprintf(out, cap, "%s/spotify/soloist.key", state_dir()); }
+static int has_key(void) { char p[300]; key_path(p, sizeof p); struct stat st; return !stat(p, &st) && st.st_size > 0; }
+int spotify_set_key(const char *k)
+{
+    char p[300], d[300];
+    size_t n = strlen(k);
+    if (n > 200) return -1;
+    for (const unsigned char *q = (const unsigned char *)k; *q; q++) if (*q <= ' ' || *q > '~') return -1;
+    dir_path(d, sizeof d); mkdir(d, 0700); key_path(p, sizeof p);
+    if (n ? statefile_write(p, 0600, k, n) : (unlink(p) && errno != ENOENT ? -1 : 0)) return -1;
+    atomic_store(&restart_now, 1);
+    fprintf(stderr, "spotify: Soloist API key %s\n", n ? "saved" : "removed");
+    return 0;
+}
 
 static void name_load(void)
 {
@@ -233,8 +271,9 @@ size_t spotify_status_json(char *out, size_t cap)
     return (size_t)snprintf(out, cap,
         "{\"present\":%d,\"enabled\":%d,\"running\":%d,\"ready\":%d,\"logged_in\":%d,\"user\":\"%s\",\"playing\":%d,"
         "\"title\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\",\"result\":\"%s\",\"result_age\":%lld,\"name\":\"%s\","
-        "\"default_name\":\"%s\",\"port\":%d,\"error\":\"%s\"}",
-        spotify_present(), atomic_load(&enabled), run, rd, li, u, pl, t[0], t[1], t[2], r, age, nm, dn, SPOTIFY_PORT, e);
+        "\"default_name\":\"%s\",\"port\":%d,\"error\":\"%s\",\"engine\":\"%s\",\"soloist\":%d,\"has_key\":%d}",
+        spotify_present(), atomic_load(&enabled), run, rd, li, u, pl, t[0], t[1], t[2], r, age, nm, dn,
+        use_soloist() ? SOLOIST_ZC_PORT : SPOTIFY_PORT, e, use_soloist() ? "soloist" : "librespot", spotify_soloist_present(), has_key());
 }
 
 /* ---------------------------------------------------------------- mDNS */
@@ -311,10 +350,16 @@ static int spawn(int *in_w, int *out_r, int *aud_r)
     device_id(did); shown_name(nm, sizeof nm);
     pthread_mutex_lock(&core_lock); int v = core_volume(); pthread_mutex_unlock(&core_lock);
     snprintf(vol, sizeof vol, "%d", v); snprintf(br, sizeof br, "%s", spotify_bitrates[atomic_load(&bitrate)]);
-    char port[8]; snprintf(port, sizeof port, "%d", SPOTIFY_PORT);
+    int sol = use_soloist();
+    char port[8], wsp[8], rt[PATH_MAX], key[300];
+    snprintf(port, sizeof port, "%d", sol ? SOLOIST_ZC_PORT : SPOTIFY_PORT); snprintf(wsp, sizeof wsp, "%d", SOLOIST_WS_PORT);
+    runtime_dir(rt, sizeof rt); key_path(key, sizeof key);
+    if (sol) { strncat(dir, "/soloist", sizeof dir - strlen(dir) - 1); mkdir(dir, 0700); }
     const char *b = bin();
     char *argv[] = { (char *)b, "--name", nm, "--dir", dir, "--port", port, "--device-id", did, "--bitrate", br,
-                     "--normalise", atomic_load(&normalise) ? "1" : "0", "--volume", vol, "--audio-fd", "3", NULL };
+                     "--normalise", atomic_load(&normalise) ? "1" : "0", "--volume", vol, "--audio-fd", "3",
+                     "--engine", sol ? "soloist" : "librespot", "--runtime", getenv("HASSMIC_SOLOIST_RUNTIME") ? getenv("HASSMIC_SOLOIST_RUNTIME") : rt,
+                     "--soloist-key-file", key, "--ws-port", wsp, NULL };
     if (pipe2(pin, O_CLOEXEC)) return -1;
     if (pipe2(pout, O_CLOEXEC)) { close(pin[0]); close(pin[1]); return -1; }
     if (pipe2(paud, O_CLOEXEC)) { close(pin[0]); close(pin[1]); close(pout[0]); close(pout[1]); return -1; }
@@ -351,7 +396,8 @@ static void event(char *l)
 {
     if (!strncmp(l, "pid ", 4)) { pthread_mutex_lock(&sl); pid = (pid_t)atoi(l + 4); pthread_mutex_unlock(&sl); return; }
     fprintf(stderr, "spotify: < %s\n", !strncmp(l, "track ", 6) ? "track" : l);
-    if (!strcmp(l, "ready")) { pthread_mutex_lock(&sl); ready = 1; pthread_mutex_unlock(&sl); mdns_write(1); return; }
+    /* Soloist announces itself (its own mDNS, beside avahi), and its zeroconf port is another */
+    if (!strcmp(l, "ready")) { pthread_mutex_lock(&sl); ready = 1; pthread_mutex_unlock(&sl); if (!use_soloist()) mdns_write(1); return; }
     if (!strncmp(l, "login ", 6)) {
         pthread_mutex_lock(&sl);
         logged_in = strcmp(l + 6, "-") != 0; snprintf(user, sizeof user, "%s", logged_in ? l + 6 : "");
@@ -410,7 +456,7 @@ static void *supervisor(void *arg)
         }
         int in_w, out_r, aud_r;
         if (spawn(&in_w, &out_r, &aud_r)) { fprintf(stderr, "spotify: cannot start %s: %s\n", bin(), strerror(errno)); sleep(10); continue; }
-        fprintf(stderr, "spotify: started %s\n", bin());
+        fprintf(stderr, "spotify: started %s (%s)\n", bin(), use_soloist() ? "Soloist" : "librespot");
         pthread_t at; pthread_create(&at, NULL, audio_thread, (void *)(long)aud_r);
         pthread_mutex_lock(&sl);
         cmd_fd = in_w; running = 1; ready = 0; logged_in = 0; playing = 0; started_at = mono_ms(); last_volume = -1; last_error[0] = 0;

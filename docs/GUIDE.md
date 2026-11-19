@@ -718,6 +718,16 @@ Spotify may limit for speakers like this one; "Spiel Spotify" and the liked song
 [librespot](https://github.com/librespot-org/librespot) (`hassmic-spotify`), started by hassmic while the setting is
 on. Not yet on other models.
 
+**Spotify client.** For some accounts (a Duo one among them) Spotify hands librespot no keys for its tracks: the Echo
+logs in and stays silent. "Spotify client" on the card picks between librespot and **Soloist**, Spotify's own
+software for speakers, the default. Soloist is Spotify's and may not be passed on, so the Echo downloads it from
+Spotify itself the first time (about 10 MB; again every 30 days, since a Soloist build stops working after 90) and
+runs it beside hassmic, which plays its sound and keeps its volume, buttons and voice commands as with librespot.
+Soloist needs a developer key: log in at developer.spotify.com, create an app with "Soloist" access, copy its key and
+give it to the card's "Set key…" (it travels encrypted and stays on the Echo). Then pick the Echo in the Spotify app
+as above; Soloist announces itself on the network. With Soloist, "Spiel Spotify", the liked songs, "Nächstes Lied"
+and "Pause" work; searching by voice does not yet (the falling two-tone, and the card says so).
+
 ### Even volume steps
 
 Each point of the volume is the same step, wherever it is set from (Home Assistant, Music Assistant, the buttons, the
