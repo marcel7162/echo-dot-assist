@@ -291,12 +291,18 @@ UNIT := src/hassmic/hash.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.
 # One target per test, so make -j unit runs them side by side (tests/run.py does: most of them wait or compile).
 UNIT_TESTS := hash ws noise ble_crypto micgain micend afemeta wordtail wakealign wifimotion spkgain tz apcountry geo statefile ledq micdenoise earsup dha_jwt a2dp_codecs \
 	sbc web_crypto web_tar web_soundpack web_matrix web_loudness ring_pack mww blueprint_dropin buttons buttons_privacy buttons_grab afe_parcel lux ring_band ringlive ringviz sounds wifictl ringbar volcurve band_map setup_wipe firmware kiosk backlight alexaoff \
-	screen ui touch json pb uninstall_boot sysinstall_aligners resample fork_release spotcmd spotify_rs
+	screen ui touch json pb uninstall_boot sysinstall_aligners resample fork_release spotcmd spotify_rs hmpulse
 unit: $(addprefix unit-,$(UNIT_TESTS))
 # Spotify: the spoken commands (spotcmd.c), and the speaker's own tests (zeroconf's crypto, picking a search result) on the PC
 unit-spotcmd:
 	@mkdir -p build
 	cc -O2 -Wall -Wextra -Isrc/hassmic tests/unit/spotcmd_test.c src/hassmic/spotcmd.c -o build/spotcmd_test && build/spotcmd_test
+# Soloist's libpulse (src/soloist/hmpulse.c) as Soloist uses it, built for the PC against PulseAudio's headers
+unit-hmpulse:
+	@mkdir -p build/soloist/inc
+	cp -r /usr/include/pulse build/soloist/inc/
+	cc -O2 -Wall -Wextra -fPIC -shared -fvisibility=hidden -Ibuild/soloist/inc src/soloist/hmpulse.c -o build/soloist/libhmpulse-host.so -lpthread -ldl -lm
+	cc -O2 -Wall -Ibuild/soloist/inc tests/unit/hmpulse_test.c build/soloist/libhmpulse-host.so -Wl,-rpath,$(CURDIR)/build/soloist -lm -o build/hmpulse_test && build/hmpulse_test
 unit-spotify_rs:
 	cd src/spotify && cargo test -q --locked --target-dir $(CURDIR)/build/cargo-host
 # the speaker for the PC: tests/fake_ha_spotify.py starts it for what needs no Spotify account (zeroconf's getInfo, a
