@@ -596,43 +596,37 @@ static const char *mid_path(const char *p)
     return e && p && (!strcmp(p, "/etc/machine-id") || !strcmp(p, "/var/lib/dbus/machine-id")) ? e : p;
 }
 
-API int open(const char *p, int flags, ...)
-{
-    static int (*real)(const char *, int, ...);
-    if (!real) real = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, "open");
-    va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap);
-    return real(mid_path(p), flags, m);
-}
-API int open64(const char *p, int flags, ...)
-{
-    static int (*real)(const char *, int, ...);
-    if (!real) real = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, "open64");
-    va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap);
-    return real(mid_path(p), flags, m);
-}
-API int openat(int d, const char *p, int flags, ...)
-{
-    static int (*real)(int, const char *, int, ...);
-    if (!real) real = (int (*)(int, const char *, int, ...))dlsym(RTLD_NEXT, "openat");
-    va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap);
-    return real(d, mid_path(p), flags, m);
-}
-API int openat64(int d, const char *p, int flags, ...)
-{
-    static int (*real)(int, const char *, int, ...);
-    if (!real) real = (int (*)(int, const char *, int, ...))dlsym(RTLD_NEXT, "openat64");
-    va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap);
-    return real(d, mid_path(p), flags, m);
-}
-API FILE *fopen(const char *restrict p, const char *restrict mode)
-{
-    static FILE *(*real)(const char *, const char *);
-    if (!real) real = (FILE *(*)(const char *, const char *))dlsym(RTLD_NEXT, "fopen");
-    return real(mid_path(p), mode);
-}
-API FILE *fopen64(const char *restrict p, const char *restrict mode)
-{
-    static FILE *(*real)(const char *, const char *);
-    if (!real) real = (FILE *(*)(const char *, const char *))dlsym(RTLD_NEXT, "fopen64");
-    return real(mid_path(p), mode);
-}
+/* Each under its exported name by asm label: with 64-bit file offsets (Ubuntu's armhf glibc) the headers turn open
+ * into open64 and fopen into fopen64, and C names for both would be one symbol twice */
+#define MID_OPEN(cname, sym)                                                                          \
+    API int cname(const char *p, int flags, ...) __asm__(sym);                                         \
+    API int cname(const char *p, int flags, ...)                                                       \
+    {                                                                                                  \
+        static int (*real)(const char *, int, ...);                                                    \
+        if (!real) real = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, sym);                     \
+        va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap); \
+        return real(mid_path(p), flags, m);                                                            \
+    }
+#define MID_OPENAT(cname, sym)                                                                        \
+    API int cname(int d, const char *p, int flags, ...) __asm__(sym);                                  \
+    API int cname(int d, const char *p, int flags, ...)                                                \
+    {                                                                                                  \
+        static int (*real)(int, const char *, int, ...);                                               \
+        if (!real) real = (int (*)(int, const char *, int, ...))dlsym(RTLD_NEXT, sym);                \
+        va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap); \
+        return real(d, mid_path(p), flags, m);                                                         \
+    }
+#define MID_FOPEN(cname, sym)                                                                         \
+    API FILE *cname(const char *p, const char *mode) __asm__(sym);                                     \
+    API FILE *cname(const char *p, const char *mode)                                                   \
+    {                                                                                                  \
+        static FILE *(*real)(const char *, const char *);                                              \
+        if (!real) real = (FILE *(*)(const char *, const char *))dlsym(RTLD_NEXT, sym);               \
+        return real(mid_path(p), mode);                                                                \
+    }
+MID_OPEN(hm_open, "open")
+MID_OPEN(hm_open64, "open64")
+MID_OPENAT(hm_openat, "openat")
+MID_OPENAT(hm_openat64, "openat64")
+MID_FOPEN(hm_fopen, "fopen")
+MID_FOPEN(hm_fopen64, "fopen64")
