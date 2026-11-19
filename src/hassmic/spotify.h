@@ -27,7 +27,8 @@ void spotify_volume_changed(int v);     /* the Echo's music volume moved (keys, 
 void spotify_pause(void);               /* another music source started (core_music): newest wins */
 int  spotify_stop(void);                /* "<wake word>, stop": 1 if it paused Spotify */
 int  spotify_button(void);              /* action button: pause, or play again what the button paused; 1 = used */
-int  spotify_skip(int dir);             /* action button twice (+1) / three times (-1); 1 = sent */
+int  spotify_skip(int dir);
+void spotify_resume(void);              /* a group member's controller said play (ssgroup.c) */             /* action button twice (+1) / three times (-1); 1 = sent */
 /* speech to text's words: 1 if they were a command for Spotify (sent, or refused with the error sound); the run is the
  * caller's to cancel.  wake: the wake phrase ("Alexa"), so "Alexa, spiel Spotify" with the word sent too reads right */
 int  spotify_command(const char *text, const char *wake);

@@ -4480,3 +4480,12 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       `tests/fake_ntp.py` (a stand-in server: the time taken, a spoofed answer not, off = no queries).
 - [x] **On both Echos, 2026-11-19.**  The tester's Dot 3 and Dot 2 with Soloist, after a power cut: the clock from
       NTP, both listed in the Spotify app under their own names, both play.
+- [~] **Spotify on every Echo, 2026-11-19.**  Music Assistant's Spotify plays through librespot (refused on the tester's
+      Duo account) and its search was rate limited to uselessness, so the Echo running Soloist serves the group itself:
+      `ssgroup.c`, a Sendspin 1.0 server of hassmic's own for the members' existing players (no change to their
+      playout).  Trust: a long-term PSK derived from the network key and the server id, no pairing; another network's
+      Echo fails the handshake.  44.1 -> 48 kHz Catmull-Rom on the leader, 25 ms PCM chunks 600 ms ahead (Wi-Fi's
+      jitter on top of the players' 300 ms lead), stalls shift the timeline (a gap to the players).  On the PC
+      (`tests/fake_ssgroup.py`): both players 3 ms apart in what they wrote, volume, a member's button.  Open, on the
+      Echos: Wi-Fi bandwidth (PCM 1.5 Mbit/s a member: 2 members fine, Opus if more), the 600 ms lead on the tester's
+      hotspot, the leader's CPU with Soloist + server + its own player.

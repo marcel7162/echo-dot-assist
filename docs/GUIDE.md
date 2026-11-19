@@ -721,6 +721,15 @@ on. Not yet on other models.
 Spotify needs the right date (its servers' certificates are checked against it). The Echo takes it from public time
 servers by itself ("Time from the internet", System, on by default), else from Home Assistant once connected.
 
+**Spotify on every Echo.** Switch on "Spotify on every Echo" on the Echo you play Spotify on, and every Echo of its
+network (the Echos page, the network wake word arbitration uses) plays its Spotify too, in step: that Echo sends the
+music to the others' Sendspin players, the same ones Music Assistant plays on, and they play it to within a few
+milliseconds of each other. Nothing to switch on on the others; they only need a current version. The Spotify app
+shows the one Echo; its volume slider sets every Echo to that volume, and the action button, two or three presses,
+and "<wake word>, stop" on any Echo pause or skip it. The music starts about half a second after the app shows it
+(time for the Wi-Fi). Echos outside the network never get it: the players only take it under a key derived from the
+network's own. An Echo that is not in a network plays Spotify alone as before.
+
 **Spotify client.** For some accounts (a Duo one among them) Spotify hands librespot no keys for its tracks: the Echo
 logs in and stays silent. "Spotify client" on the card picks between librespot and **Soloist**, Spotify's own
 software for speakers, the default. Soloist is Spotify's and may not be passed on, so the Echo downloads it from

@@ -9,6 +9,7 @@
 #include "duck.h"
 #include "https.h"
 #include "ntp.h"
+#include "ssgroup.h"
 #include "ble.h"
 #include "btout.h"
 #include "micend.h"
@@ -109,7 +110,7 @@ static int colour_actual(void)
 /* ---------------------------------------------------------------- the table */
 
 enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, TIMER_STOP_OTHERS, STOP_ENDS, MULTI_PRESS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, MUSIC_PAGE, SCR_AUTO, SCR_LEVEL, SCR_ADJUST, SCR_COLOUR, SCREEN_TEXT, SCREEN_HOLD, SCREEN_TIMERS, SCR_SLEEP, SCR_CLOCK, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WAKE_EVENTS, REQUEST_TEXT, RING_LIVE, WIFI_MOTION,
-          WIFI_SENS, LIGHT_SENSOR, BT_PROXY, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, CALL_MIC, UPDATES, HTTPS_VERIFY, NTP_TIME, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, KIOSK_DLNA, SS_UNPAIRED, SPOTIFY, SPOTIFY_ENGINE, SPOTIFY_VOICE, SPOTIFY_BITRATE, SPOTIFY_NORM, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, DUCK, DUCK_OTHERS, VOLUME, VOL_SPLIT,
+          WIFI_SENS, LIGHT_SENSOR, BT_PROXY, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, CALL_MIC, UPDATES, HTTPS_VERIFY, NTP_TIME, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, KIOSK_DLNA, SS_UNPAIRED, SPOTIFY, SPOTIFY_ENGINE, SPOTIFY_VOICE, SPOTIFY_BITRATE, SPOTIFY_NORM, SPOTIFY_GROUP, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, DUCK, DUCK_OTHERS, VOLUME, VOL_SPLIT,
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET,
           VOL_EVEN, NSET };
@@ -244,6 +245,8 @@ static const struct setting table[NSET] = {
     [SPOTIFY_VOICE] = { "spotify_voice", "Spotify by voice", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
     [SPOTIFY_BITRATE] = { "spotify_bitrate", "Spotify quality", "Music", "kbit/s", S_CHOICE, 0, 0, 1, 0 },
     [SPOTIFY_NORM] = { "spotify_normalise", "Spotify volume normalisation", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* ssgroup.c: this Echo's Spotify on every Echo of its arbitration network, in step (their Sendspin players) */
+    [SPOTIFY_GROUP] = { "spotify_group", "Spotify on every Echo", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
     [EQ_BASS]     = { "equalizer_bass", "Equalizer bass", "Sound", "dB", S_INT, -6, 6, 1, 0 },
     [EQ_MID]      = { "equalizer_mid", "Equalizer mid", "Sound", "dB", S_INT, -6, 6, 1, 0 },
     [EQ_TREBLE]   = { "equalizer_treble", "Equalizer treble", "Sound", "dB", S_INT, -6, 6, 1, 0 },
@@ -293,6 +296,7 @@ static int present(enum id i)
     case CALL_MIC: return callmic_present() && dropin_running();
     case SS_UNPAIRED: return core_sendspin_port != 0;
     case SPOTIFY: case SPOTIFY_VOICE: case SPOTIFY_BITRATE: case SPOTIFY_NORM: return spotify_present();
+    case SPOTIFY_GROUP: return spotify_present() && core_sendspin_port;
     case SPOTIFY_ENGINE: return spotify_present() && spotify_soloist_present();
     case SPK_GAIN: return spkgain_present();
     case MULTI_PRESS: return !board.action_combo;               /* the Shows: no action key, the volume pair stands in */
@@ -421,6 +425,7 @@ int settings_get(const struct setting *s)
     case SPOTIFY: return spotify_enable(-1);
     case SPOTIFY_VOICE: return spotify_voice(-1);
     case SPOTIFY_ENGINE: return spotify_engine(-1);
+    case SPOTIFY_GROUP: return ssgroup_enable(-1);
     case SPOTIFY_BITRATE: return spotify_bitrate(-1);
     case SPOTIFY_NORM: return spotify_normalise(-1);
     case EQ_BASS: case EQ_MID: case EQ_TREBLE: return core_eq((int)(s - table) - EQ_BASS);
@@ -508,7 +513,8 @@ static void put(enum id i, int v)
     case SS_UNPAIRED: sendspin_unpaired(v); break;              /* sendspin.c keeps it */
     case SPOTIFY: spotify_enable(v); break;                     /* spotify.c: started or ended by its supervisor */
     case SPOTIFY_VOICE: spotify_voice(v); break;
-    case SPOTIFY_ENGINE: spotify_engine(v); break;              /* the speaker starts again with the other */
+    case SPOTIFY_ENGINE: spotify_engine(v); break;
+    case SPOTIFY_GROUP: ssgroup_enable(v); break;              /* the speaker starts again with the other */
     case SPOTIFY_BITRATE: spotify_bitrate(v); break;            /* the daemon starts again with it */
     case SPOTIFY_NORM: spotify_normalise(v); break;
     case EQ_BASS: case EQ_MID: case EQ_TREBLE: core_set_eq(i - EQ_BASS, v); break;     /* the mixer keeps it */

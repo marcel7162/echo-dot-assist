@@ -81,6 +81,7 @@
 #include "board.h"
 #include "clock.h"
 #include "ntp.h"
+#include "ssgroup.h"
 #include "statefile.h"
 
 #define PIPELINE_TIMEOUT 30         /* seconds in LISTENING or THINKING before giving up */
@@ -3804,6 +3805,7 @@ int main(int argc, char **argv)
     else if (buttons_muted()) mute_latch(1, 0);
 
     if (core_sendspin_port) sendspin_start(core_sendspin_port);
+    if (core_sendspin_port && spotify_present()) ssgroup_start(core_sendspin_port);     /* Spotify on every Echo (spotify_group) */
     spotify_start();                                         /* runs the speaker while the setting is on (spotify.c) */
     if (use_bt) a2dp_start(NULL);
     static const struct improv_hooks improv_hooks = { web_attention, improv_authorized };

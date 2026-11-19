@@ -32,6 +32,7 @@
 #include "resample.h"
 #include "settings.h"
 #include "statefile.h"
+#include "ssgroup.h"
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -240,6 +241,14 @@ int spotify_button(void)
     return used;
 }
 
+void spotify_resume(void)
+{
+    pthread_mutex_lock(&sl);
+    if (running && !playing) send_locked("resume");
+    paused_by_button = 0;
+    pthread_mutex_unlock(&sl);
+}
+
 int spotify_skip(int dir)
 {
     pthread_mutex_lock(&sl);
@@ -330,6 +339,7 @@ static void *audio_thread(void *arg)
         if (r < 0 && errno == EINTR) continue;
         if (r == 0) {                                   /* 300 ms without PCM: paused, stopped or between sessions */
             if (open_) { spot_close(); open_ = 0; core_music(MUSIC_SPOTIFY, 0); fprintf(stderr, "spotify: output closed\n"); }
+            ssgroup_idle();
             continue;
         }
         ssize_t n = read(fd, (char *)buf + have, sizeof buf - have);
@@ -337,6 +347,15 @@ static void *audio_thread(void *arg)
         have += (size_t)n;
         size_t frames = have / FRAME;
         if (!frames) continue;
+        if (ssgroup_routing()) {
+            /* Spotify on every Echo (ssgroup.c): this Echo plays it as the group's member, through its Sendspin player,
+             * which ducks it and feeds the ring; no stream of its own, no core_music (that is the player's) */
+            if (open_) { spot_close(); open_ = 0; core_music(MUSIC_SPOTIFY, 0); }
+            ssgroup_pcm(buf, frames);
+            have -= frames * FRAME;
+            if (have) memmove(buf, (char *)buf + frames * FRAME, have);
+            continue;
+        }
         if (!open_) {
             if (spot_open(RATE, 2)) { fprintf(stderr, "spotify: cannot open the output\n"); usleep(200000); have = 0; continue; }
             open_ = 1; core_music(MUSIC_SPOTIFY, 1); fprintf(stderr, "spotify: output open\n");
@@ -447,6 +466,7 @@ static void event(char *l)
         pthread_mutex_lock(&sl); last_volume = v; pthread_mutex_unlock(&sl);
         pthread_mutex_lock(&core_lock);
         if (core_volume() != v) core_set_volume(v);
+        if (ssgroup_routing()) ssgroup_volume(v);       /* every Echo of the group at the app's volume */
         pthread_mutex_unlock(&core_lock);
         return;
     }
