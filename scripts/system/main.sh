@@ -188,23 +188,24 @@ take() {
     rm -rf $t; return 1
 }
 clock_set() {
-    local t= at= up now was d a first ds c
+    local t= at= src= up now was d a first ds c who
     c=$(take clock) || return 0
-    read -r t at < $c; rm -f $c
+    read -r t at src < $c; rm -f $c
+    who="Home Assistant"; [ "$src" = ntp ] && who=NTP
     read -r up _ < /proc/uptime
     case "$t" in ''|*[!0-9]*) t=x;; esac
     case "$at" in [0-9]*.[0-9][0-9]) case "${at%.*}${at#*.}" in *[!0-9]*) t=x;; esac;; *) t=x;; esac
     [ "$t" = x ] && { echo "clock: state/clock not understood, ignored"; return; }
     if [ ${#t} -ne 10 ] || [ $t -lt 1767225600 ]; then echo "clock: $t is not a time of ours, ignored"; return; fi
     ds=$(( ${up%.*} - ${at%.*} ))                   # whole seconds since hassmic had the time
-    if [ ${#at} -gt 12 ] || [ $ds -lt 0 ] || [ $ds -gt 600 ]; then echo "clock: Home Assistant's time is stale, ignored"; return; fi
+    if [ ${#at} -gt 12 ] || [ $ds -lt 0 ] || [ $ds -gt 600 ]; then echo "clock: $who's time is stale, ignored"; return; fi
     now=$(( t + (ds * 100 + 1${up#*.} - 1${at#*.} + 50) / 100 )) was=$(date +%s)     # 1xx: centiseconds without octal
     if ! date -u @$now > /dev/null 2>&1 || [ $(( $(date +%s) - now )) -gt 2 ]; then echo "clock: could not be set"; return; fi
     hwclock -w -u 2>/dev/null
     first=; [ "$(getprop hassmic.clock.synced)" = 1 ] || first=1
     setprop hassmic.clock.synced 1
     d=$((now - was)); a=behind; [ $d -lt 0 ] && { d=$((-d)); a=ahead; }
-    echo "clock: set from Home Assistant, $d s $a${first:+ (times in this log are UTC from here on, seconds since boot before)}"
+    echo "clock: set from $who, $d s $a${first:+ (times in this log are UTC from here on, seconds since boot before)}"
 }
 
 # Home Assistant's time zone (src/hassmic/clock.c, tz.c): state/timezone holds a zone name of this Echo's time zone

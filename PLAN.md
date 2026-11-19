@@ -4472,3 +4472,9 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       Echo (MD5 of "hassmic soloist <Wi-Fi MAC>") into `run/machine-id`, linked as `/system/etc/machine-id`.  A login
       Soloist kept under the old id does not decrypt any more: the Echo is picked in the app once more.  Soloist's
       "ready, device_name=… device_id=…" line now reaches boot.log, to compare the two.
+- [x] **The clock from NTP, 2026-11-19.**  The tester's Echos (no Home Assistant on the hotspot) were at 1970 again
+      after a power cut: Soloist and rustls refuse every certificate then, and Spotify never showed.  `ntp.c`: SNTP v4
+      client, a random transmit time echoed as the answer's origin (else dropped), era 0 wrap handled, half the round
+      trip added; handed to root as Home Assistant's time is (`state/clock` "... ntp").  Servers pool.ntp.org,
+      time.cloudflare.com, time.google.com in turn; every 30 s while unset, 12 h after.  Setting `ntp_time` (on).
+      `tests/fake_ntp.py` (a stand-in server: the time taken, a spoofed answer not, off = no queries).

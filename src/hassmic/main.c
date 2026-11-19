@@ -80,6 +80,7 @@
 #include "web.h"
 #include "board.h"
 #include "clock.h"
+#include "ntp.h"
 #include "statefile.h"
 
 #define PIPELINE_TIMEOUT 30         /* seconds in LISTENING or THINKING before giving up */
@@ -3809,6 +3810,7 @@ int main(int argc, char **argv)
     if (use_bt) improv_start(&improv_hooks);                 /* setup over Bluetooth, when there is no network (improv.c) */
     if (ota_port) ota_start(ota_port);
     pthread_mutex_lock(&core_lock); core_timer_sound_default(); settings_load(); settings_preset(); pthread_mutex_unlock(&core_lock);    /* whatever the protocol */
+    ntp_start();                                    /* the clock from NTP until Home Assistant sets it (ntp_time) */
     ringlive_begin();                   /* the mute and the Echo's own patterns known: what the last run left lit, dark */
     davs_start();                                             /* Amazon login for artifact downloads (settings page) */
     static const struct web_hooks web_hooks = { web_attention, web_approved };

@@ -718,6 +718,9 @@ Spotify may limit for speakers like this one; "Spiel Spotify" and the liked song
 [librespot](https://github.com/librespot-org/librespot) (`hassmic-spotify`), started by hassmic while the setting is
 on. Not yet on other models.
 
+Spotify needs the right date (its servers' certificates are checked against it). The Echo takes it from public time
+servers by itself ("Time from the internet", System, on by default), else from Home Assistant once connected.
+
 **Spotify client.** For some accounts (a Duo one among them) Spotify hands librespot no keys for its tracks: the Echo
 logs in and stays silent. "Spotify client" on the card picks between librespot and **Soloist**, Spotify's own
 software for speakers, the default. Soloist is Spotify's and may not be passed on, so the Echo downloads it from

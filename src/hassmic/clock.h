@@ -10,6 +10,7 @@ void clock_log_start(void);
 /* Home Assistant's time (GetTimeResponse, over the connection with the device key): handed to root to set the clock,
  * when it is off or not set since boot.  Any lock may be held. */
 void clock_from_ha(uint32_t epoch);
+void clock_hand(uint32_t epoch, const char *src);  /* the same from another source ("ntp": ntp.c) */
 /* Home Assistant's time zone (GetTimeResponse field 2: a POSIX TZ string; same link): handed to root as a zone name of
  * the Echo's time zone data (tz.c), or the string itself where none has that rule, when it is not the zone set.  Any
  * lock may be held: the work is done in a thread of its own, after this returns. */

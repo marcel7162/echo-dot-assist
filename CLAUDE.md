@@ -554,7 +554,10 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
 - **Clock and log stamps** (`clock.c`): `proto_esphome.c` asks HA for the time (GetTimeRequest) on every link (on
   subscribe, then every 6 h on pings; the clock takes keyed links' answers only, any does for "Next timer"'s end,
   `ha_time`); `clock_from_ha` leaves `<epoch> <boottime s.cs>` in `state/clock`, root's
-  `main.sh` `clock_set` (netwatch) sets clock + RTC and `hassmic.clock.synced`. `clock_log_start()` (first in `main()`
+  `main.sh` `clock_set` (netwatch) sets clock + RTC and `hassmic.clock.synced`.  `ntp.c` (setting `ntp_time`, on):
+  SNTP to pool.ntp.org / Cloudflare / Google while unsynced (every 30 s) and every 12 h after, the same file with a
+  third word `ntp` (`clock_hand`); a random transmit time that the answer must echo; replies come in as established
+  flows (lockdown.sh); `HASSMIC_NTP` for tests (`tests/fake_ntp.py`; esphome_common points it at a dead port). `clock_log_start()` (first in `main()`
   after options) turns stderr/stdout into a pipe to a double-forked reader that stamps lines and drops known Amazon
   noise; it ignores hassmic's signals and ends at EOF. Never make it hassmic's direct child (Amazon's DHA module waits
   for all children). Host: `HASSMIC_CLOCK_SYNCED=0` plays an unset clock.

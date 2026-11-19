@@ -46,7 +46,7 @@ async def main():
                HASSMIC_FAKE_WHISPER="1", HASSMIC_ADB_OPEN=os.path.join(state, "adb-open.root"),
                HASSMIC_FAKE_SOUND_MODEL=os.path.join(state, "aed-model"),           # which sound model there is (sound_none.c)
                HASSMIC_LOG=os.path.join(state, "log"),                              # boot.log, for the page's viewer
-               HASSMIC_CLOCK_SYNCED="0",                                            # stamps: seconds since boot (clock.c)
+               HASSMIC_CLOCK_SYNCED="0", HASSMIC_NTP="127.0.0.1:9",                                            # stamps: seconds since boot (clock.c)
                HASSMIC_FAKE_SPEAKER_GAIN=os.path.join(state, "speaker-gain"),       # an Echo Dot 2's codec control (spkgain.c)
                HASSMIC_FAKE_ADAPTIVE_COLOUR=os.path.join(state, "adaptive-colour")) # root's confirmed Binder readback
     with open(os.path.join(state, "speaker-gain"), "w") as f: f.write("6\n")          # stock: what the HAL's speaker path sets

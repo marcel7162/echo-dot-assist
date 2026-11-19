@@ -51,6 +51,7 @@ TESTS = [
     ("bt-proxy", [PY, "tests/fake_ha_bt_proxy.py"]),
     ("dropin", [PY, "tests/fake_ha_dropin.py"]),
     ("spotify", [PY, "tests/fake_ha_spotify.py"]),
+    ("ntp", [PY, "tests/fake_ntp.py"]),
     ("unit", ["make", "-s", "-j4", "unit"]),
     ("mww", [PY, "tests/fake_web_mww.py"]),
     ("web", [PY, "tests/fake_web.py"]),

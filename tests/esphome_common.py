@@ -187,6 +187,7 @@ class Echo:
                    HASSMIC_FAKE_WHISPER="1",                                    # a model, and every request whispered (whisper_none.c)
                    HASSMIC_FAKE_WIFI=os.path.join(state, "rx_stat"),            # what the Wi-Fi driver answers RX_STAT (wifimotion.c)
                    HASSMIC_CLOCK_SYNCED="0",                                    # an Echo whose clock nobody set (clock.c)
+                   HASSMIC_NTP="127.0.0.1:9",                                   # no time server answers (ntp.c; tests/fake_ntp.py)
                    HASSMIC_FAKE_ADDRS=os.path.join(state, "addrs"),             # the Echo's addresses (netaddr.c)
                    HASSMIC_FAKE_COUNTRY=os.path.join(state, "country"),         # the Wi-Fi's country (apcountry.c): none
                    HASSMIC_ANNOUNCE_TIMES="3 6")                                # mDNS again after 3 s without a client (100 s)

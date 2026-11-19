@@ -75,18 +75,21 @@ int clock_synced(void)
 #endif
 }
 
-void clock_from_ha(uint32_t epoch)
+/* the time for root (main.sh clock_set): "<epoch> <boottime s.cs> [ntp]"; Home Assistant's (src NULL) or NTP's (ntp.c) */
+void clock_hand(uint32_t epoch, const char *src)
 {
     char p[300], t[64]; struct timespec bt;
+    const char *who = src ? "NTP" : "Home Assistant";
     long long off = (long long)epoch - (long long)time(NULL);
-    if (epoch < EPOCH_MIN) { fprintf(stderr, "clock: Home Assistant says %u, earlier than this build: ignored\n", epoch); return; }
+    if (epoch < EPOCH_MIN) { fprintf(stderr, "clock: %s says %u, earlier than this build: ignored\n", who, epoch); return; }
     if (clock_synced() && off >= -2 && off <= 2) return;
     clock_gettime(CLOCK_BOOTTIME, &bt);
     snprintf(p, sizeof p, "%s/clock", state_dir());
-    snprintf(t, sizeof t, "%u %lld.%02ld\n", epoch, (long long)bt.tv_sec, bt.tv_nsec / 10000000);
+    snprintf(t, sizeof t, "%u %lld.%02ld%s%s\n", epoch, (long long)bt.tv_sec, bt.tv_nsec / 10000000, src ? " " : "", src ? src : "");
     if (statefile_write(p, 0666, t, strlen(t))) { fprintf(stderr, "clock: cannot write %s\n", p); return; }
-    fprintf(stderr, "clock: Home Assistant's time handed to root, this Echo's clock is %lld s %s\n", off < 0 ? -off : off, off < 0 ? "ahead" : "behind");
+    fprintf(stderr, "clock: %s's time handed to root, this Echo's clock is %lld s %s\n", who, off < 0 ? -off : off, off < 0 ? "ahead" : "behind");
 }
+void clock_from_ha(uint32_t epoch) { clock_hand(epoch, NULL); }
 
 /* bionic's time zone data: an update's (N and later, then M), else the system's */
 static const char *const TZDATA[] = { "/data/misc/zoneinfo/current/tzdata", "/data/misc/zoneinfo/tzdata",

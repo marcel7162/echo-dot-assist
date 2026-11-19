@@ -4,6 +4,12 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-11-19 — Spotify on the Echo Dot 3
 
+- **The Echo sets its clock from the internet.** Until now only Home Assistant set it, so after a power cut an Echo
+  that had not reached Home Assistant yet had a date in 1970, and everything that uses HTTPS failed: Spotify, online
+  updates, replies from an HTTPS Home Assistant. It now asks public time servers (pool.ntp.org, Cloudflare's,
+  Google's) until its clock is set, and twice a day after; Home Assistant's time still wins once it is connected.
+  "Time from the internet" (System) switches it off.
+
 - **The Echo Dot 3 is a Spotify Connect speaker again, and plays Spotify by voice.** Switch on "Spotify Connect" on
   the settings page (Music & Bluetooth), pick the Echo in the Spotify app once, and it plays like a speaker Alexa
   ran: the app's volume slider and the Echo's buttons move together, the action button pauses, the assistant ducks
