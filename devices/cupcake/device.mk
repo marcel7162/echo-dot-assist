@@ -4,6 +4,10 @@
 # OpenSL ES (audio_android.c; docs/re-cupcake.md).  libopus.so and libz.so are donut's; libpryon.so is a build of its own
 # with the same functions (pryon_test under qemu: the same detection as checkers' on its own en-US/ALEXA model).
 TARGET  := armv7a-linux-androideabi24
+# Spotify Connect (src/spotify/, Rust) and Soloist's glibc runtime, as donut's: the same 32-bit ARM userspace;
+# the music goes out of its line out / Bluetooth speaker (no speaker of its own)
+SPOTIFY := armv7-linux-androideabi
+SOLOIST := 1
 # Backends (src/hassmic/audio.h, wake.h) and the stock libraries they link against, from $(STOCK).
 AUDIO   := src/hassmic/audio_android.c
 WAKE    := src/hassmic/wake_pryon.c
