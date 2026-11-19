@@ -15,10 +15,12 @@
  * Built with the glibc armhf toolchain against PulseAudio's own headers (Makefile), so the structs Soloist reads
  * (pa_timing_info, pa_sink_input_info, pa_cvolume) are laid out as libpulse's. */
 #define _GNU_SOURCE
+#undef _FORTIFY_SOURCE          /* open() and fopen() are ours below (machine-id): no fortify wrappers over them */
 #include <pulse/pulseaudio.h>
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -581,4 +583,56 @@ API int bind(int fd, const struct sockaddr *addr, socklen_t len)
         }
     }
     return real(fd, addr, len);
+}
+
+/* ---------------------------------------------------------------- machine-id: a second speaker on one Echo */
+
+/* Soloist's Spotify device id is /etc/machine-id's (else /var/lib/dbus/machine-id's): the same for every Soloist on
+ * one Echo, so the group's speaker ("Alle Echos", ssgroup.c) beside the Echo's own was one device to the app.
+ * HMPULSE_MACHINE_ID names a file of its own to read instead. */
+static const char *mid_path(const char *p)
+{
+    const char *e = getenv("HMPULSE_MACHINE_ID");
+    return e && p && (!strcmp(p, "/etc/machine-id") || !strcmp(p, "/var/lib/dbus/machine-id")) ? e : p;
+}
+
+API int open(const char *p, int flags, ...)
+{
+    static int (*real)(const char *, int, ...);
+    if (!real) real = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, "open");
+    va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap);
+    return real(mid_path(p), flags, m);
+}
+API int open64(const char *p, int flags, ...)
+{
+    static int (*real)(const char *, int, ...);
+    if (!real) real = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, "open64");
+    va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap);
+    return real(mid_path(p), flags, m);
+}
+API int openat(int d, const char *p, int flags, ...)
+{
+    static int (*real)(int, const char *, int, ...);
+    if (!real) real = (int (*)(int, const char *, int, ...))dlsym(RTLD_NEXT, "openat");
+    va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap);
+    return real(d, mid_path(p), flags, m);
+}
+API int openat64(int d, const char *p, int flags, ...)
+{
+    static int (*real)(int, const char *, int, ...);
+    if (!real) real = (int (*)(int, const char *, int, ...))dlsym(RTLD_NEXT, "openat64");
+    va_list ap; va_start(ap, flags); mode_t m = (flags & (O_CREAT | O_TMPFILE)) ? (mode_t)va_arg(ap, int) : 0; va_end(ap);
+    return real(d, mid_path(p), flags, m);
+}
+API FILE *fopen(const char *restrict p, const char *restrict mode)
+{
+    static FILE *(*real)(const char *, const char *);
+    if (!real) real = (FILE *(*)(const char *, const char *))dlsym(RTLD_NEXT, "fopen");
+    return real(mid_path(p), mode);
+}
+API FILE *fopen64(const char *restrict p, const char *restrict mode)
+{
+    static FILE *(*real)(const char *, const char *);
+    if (!real) real = (FILE *(*)(const char *, const char *))dlsym(RTLD_NEXT, "fopen64");
+    return real(mid_path(p), mode);
 }

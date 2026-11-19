@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Spotify on every Echo (ssgroup.c) with two Echos (build/hassmic-host) of one arbitration network on this PC: the
-leader runs a stand-in Spotify (tests/fake_spotify.py) with "Spotify on every Echo" on and serves it as a Sendspin
-server; both Echos' Sendspin players take it under the network's derived key (no pairing) and play it, the leader
-none of it on its own Spotify stream; the app's volume reaches both; a player's action button pauses Spotify; the
-music stopped ends the stream on both.  An Echo of another network is refused."""
+"""Spotify on every Echo (ssgroup.c) with Echos (build/hassmic-host) of one arbitration network on this PC: with
+"Spotify on every Echo" on, the leader runs a second stand-in speaker (tests/fake_spotify.py), "Alle Echos", with a
+device id of its own, and serves what it plays as a Sendspin server; both Echos' Sendspin players take it under the
+network's derived key (no pairing) and play it in step, the leader's own speaker untouched; the app's volume reaches
+both; a member left out on the page is let go and taken back in; a player's action button pauses the group's
+speaker; the music stopped ends the stream.  An Echo of another network is refused."""
 import asyncio, base64, json, os, subprocess, sys, tempfile, time
 from arbecho import Echo, ROOT, check, until
 from webclient import wait_port, Browser
@@ -34,7 +35,7 @@ async def main():
     lead = GEcho("Echo Lead", 17241, LS, NET, config="spotify=on\nspotify_group=on\nspotify_engine=librespot\n", extra=dict(
         HASSMIC_SPOTIFY=os.path.join(ROOT, "tests", "fake_spotify.py"), FAKE_SPOTIFY_LOG=slog, FAKE_SPOTIFY_CTL=sctl,
         FAKE_SPOTIFY_USER="tester", HASSMIC_SPOT=spot, HASSMIC_SPOTIFY_MDNS=os.path.join(tmp, "mdns"),
-        HASSMIC_SSGROUP_PEERS=f"127.0.0.1:{LS},127.0.0.1:{FS},127.0.0.1:{XS}"))
+        HASSMIC_SSGROUP_PEERS=f"echo-lead@127.0.0.1:{LS},echo-follow@127.0.0.1:{FS},echo-other@127.0.0.1:{XS}"))
     fol = GEcho("Echo Follow", 17243, FS, NET)
     other = GEcho("Echo Other", 17245, XS, (0xbad, os.urandom(32)))
     for e in (lead, fol, other): e.start()
@@ -46,13 +47,21 @@ async def main():
         check(names.get("spotify_group", {}).get("value") == 1, "\"Spotify on every Echo\" is on (state/config)")
         await until(lambda: json.loads(page.call("GET", "/api/spotify")[2]).get("logged_in"), 8)
 
-        st, _, d = page.call("POST", "/api/spotify", b"say Spiel Spotify")
-        check(st == 200, "\"Spiel Spotify\" on the leader")
+        args = lambda: [json.loads(l[5:]) for l in open(slog).read().splitlines() if l.startswith("args ")]
+        grp = lambda: [a for a in args() if a[a.index("--name") + 1] == "Alle Echos"]
+        check(await until(lambda: grp(), 8), "a second speaker \"Alle Echos\" runs beside the Echo's own")
+        g = dict(zip(grp()[0][0::2], grp()[0][1::2])) if grp() else {}
+        own = next((dict(zip(a[0::2], a[1::2])) for a in args() if a not in grp()), {})
+        check(g.get("--port") == "28938" and g.get("--dir", "").endswith("spotify/group") and len(g.get("--machine-id", "")) == 32
+              and g.get("--device-id") != own.get("--device-id"), f"  its own port, folder, machine-id and device id ({g})")
+        check(await until(lambda: os.path.exists(os.path.join(tmp, "mdns.group")) and "Alle Echos" in open(os.path.join(tmp, "mdns.group")).read(), 5),
+              "  announced under its name (librespot: avahi's record)")
+        with open(sctl, "a") as f: f.write("!Alle Echos:play\n")      # picked in the Spotify app, it plays
         check(await until(lambda: "player role active (paired)" in fol.text(), 15), "the follower's player takes the leader's server under the network's key")
         check("player role active (paired)" in lead.text(), "  and so does the leader's own")
         l0, f0 = lead.size(), fol.size()
-        check(await until(lambda: fol.size() > f0 + 48000 * 4 and lead.size() > l0 + 48000 * 4, 10), "both play Spotify's music through Sendspin")
-        check(not os.path.exists(spot) or os.path.getsize(spot) == 0, "  the leader's own Spotify stream stays silent")
+        check(await until(lambda: fol.size() > f0 + 48000 * 4 and lead.size() > l0 + 48000 * 4, 10), "both play the group's music through Sendspin")
+        check(not os.path.exists(spot) or os.path.getsize(spot) == 0, "  the leader's own speaker's stream stays silent")
         check("stream start (pcm)" in fol.text(), "  as PCM at 48 kHz")
         # in step: the PC's music sinks take PCM at real time once it is due, so what both wrote since the start
         # differs by how far apart they play (48 kHz stereo 16 bit: 192 bytes a millisecond)
@@ -72,10 +81,24 @@ async def main():
         fvol = lambda: next(x["value"] for x in fpage.state()["settings"] if x["name"] == "volume")
         check(await until(lambda: fvol() == 37, 6), "the app's volume at 37: the follower too")
 
-        # the follower's action button: Spotify pauses
+        # the page: the group's members; the follower left out and taken back
+        gs = lambda: json.loads(page.call("GET", "/api/spotify")[2])["group"]
+        mem = {m["node"]: m for m in gs()["members"]}
+        check(gs()["on"] == 1 and gs()["name"] == "Alle Echos" and mem.get("echo-follow", {}).get("joined") == 1 and mem.get("echo-lead", {}).get("self") == 1,
+              f"the page lists the group's members, who joined ({gs()['members']})")
+        st, _, _ = page.call("POST", "/api/spotify", b"group_out echo-follow")
+        check(st == 200 and await until(lambda: "ssgroup: 127.0.0.1:%d left" % FS in lead.text(), 6), "the follower left out: let go")
+        check(await until(lambda: {m["node"]: m for m in gs()["members"]}["echo-follow"]["in"] == 0, 3), "  and the page says so")
+        n_join = lead.text().count("127.0.0.1:%d joined" % FS)
+        page.call("POST", "/api/spotify", b"group_in echo-follow")
+        check(await until(lambda: lead.text().count("127.0.0.1:%d joined" % FS) > n_join and {m["node"]: m for m in gs()["members"]}["echo-follow"]["joined"] == 1, 20),
+              "  taken back in: it joins again")
+
+        # the follower's action button (once the music is back on it: before, the button has nothing playing to pause)
+        await until(lambda: fol.text().count("stream start (pcm)") >= 2, 6)
         n = open(slog).read().count("\npause")
         fol.proc.send_signal(__import__("signal").SIGUSR2)
-        check(await until(lambda: open(slog).read().count("\npause") > n, 6), "the follower's action button pauses Spotify")
+        check(await until(lambda: open(slog).read().count("\npause") > n, 6), "the follower's action button pauses the group's speaker")
         check(await until(lambda: "stream end" in fol.text(), 6), "  and the stream ends on the follower")
     finally:
         for e in (lead, fol, other):

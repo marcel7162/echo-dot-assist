@@ -4,10 +4,11 @@ What changed for people using the Echo, newest first. Details and measurements a
 
 ## 2026-11-19 — Spotify on the Echo Dot 3
 
-- **Spotify on all your Echos at once, in step.** Switch on "Spotify on every Echo" (Music & Bluetooth) on the Echo
-  you play Spotify on: every Echo of its network (the Echos page) plays along, in step like a Music Assistant group,
-  without Music Assistant. The app's volume slider sets all of them; the action button or "stop" on any of them
-  pauses. The music starts about half a second after the app shows it.
+- **Spotify on all your Echos at once, in step.** Switch on "Spotify on every Echo" (Music & Bluetooth) on one Echo:
+  the Spotify app gets a second speaker, "Alle Echos", that plays on every Echo you tick on the page, in step like
+  a Music Assistant group, without Music Assistant. Pick it in the app for all of them, or an Echo itself for that
+  one alone. The app's volume slider sets all of them; the action button or "stop" on any of them pauses. The music
+  starts about half a second after the app shows it.
 
 - **The Echo sets its clock from the internet.** Until now only Home Assistant set it, so after a power cut an Echo
   that had not reached Home Assistant yet had a date in 1970, and everything that uses HTTPS failed: Spotify, online

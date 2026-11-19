@@ -38,7 +38,12 @@ def ctl():
         try:
             with open(path) as f: lines = f.read().splitlines()
         except OSError: lines = []
-        for l in lines[seen:]: emit(l)
+        for l in lines[seen:]:
+            # "!<name>:<command>": a command to the speaker of that name only, as if from hassmic (the group's tests)
+            if l.startswith("!"):
+                who, _, c = l[1:].partition(":")
+                if who == name: command(c)
+            else: emit(l)
         seen = len(lines)
         time.sleep(0.05)
 
@@ -49,15 +54,14 @@ def play(cmd, what):
     emit(f"result {cmd} ok {what}")
 
 
-threading.Thread(target=pump, daemon=True).start()
-threading.Thread(target=ctl, daemon=True).start()
-emit("ready")
-emit(f"login {user}" if user else "login -")
-for line in sys.stdin:
-    line = line.rstrip("\n"); log.write(line + "\n")
+name = sys.argv[sys.argv.index("--name") + 1] if "--name" in sys.argv else ""
+
+
+def command(line):
+    global user
+    log.write(line + "\n")
     cmd, _, rest = line.partition(" ")
-    if cmd == "quit": break
-    elif cmd == "play": play("play", "resumed")
+    if cmd == "play": play("play", "resumed")
     elif cmd == "liked": play("liked", "liked")
     elif cmd == "search":
         kind, _, words = rest.partition(" ")
@@ -66,4 +70,14 @@ for line in sys.stdin:
     elif cmd == "pause": playing.clear(); emit("state paused")
     elif cmd == "resume": playing.set(); emit("state playing")
     elif cmd == "logout": playing.clear(); user = ""; emit("state stopped"); emit("login -")
+
+
+threading.Thread(target=pump, daemon=True).start()
+threading.Thread(target=ctl, daemon=True).start()
+emit("ready")
+emit(f"login {user}" if user else "login -")
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if line == "quit": log.write(line + "\n"); break
+    command(line)
 playing.clear()

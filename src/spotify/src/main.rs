@@ -68,13 +68,14 @@ struct Args {
     runtime: PathBuf,                   // soloist: the folder with glibc and libpulse.so.0 (hassmic's own)
     soloist_key_file: PathBuf,          // soloist: the developer API key, a file (not in this process's command line)
     ws_port: u16,
-    webapi_file: PathBuf,               // soloist: the owner's Web API app for searches, "client id\nclient secret"
+    webapi_file: PathBuf,
+    machine_id: String,                 // soloist: a device id of its own (the group's speaker beside the Echo's own)               // soloist: the owner's Web API app for searches, "client id\nclient secret"
 }
 
 fn args() -> Args {
     let mut a = Args { name: "Echo".into(), dir: PathBuf::from("."), port: 28933, device_id: String::new(), bitrate: Bitrate::Bitrate160, normalise: true, volume: 50, audio_fd: 3,
                        engine: "librespot".into(), runtime: PathBuf::from("."), soloist_key_file: PathBuf::new(), ws_port: 28937,
-                       webapi_file: PathBuf::new() };
+                       webapi_file: PathBuf::new(), machine_id: String::new() };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let v = it.next().unwrap_or_default();
@@ -92,6 +93,7 @@ fn args() -> Args {
             "--soloist-key-file" => a.soloist_key_file = PathBuf::from(v),
             "--ws-port" => a.ws_port = v.parse().unwrap_or(a.ws_port),
             "--webapi-file" => a.webapi_file = PathBuf::from(v),
+            "--machine-id" => a.machine_id = v.to_string(),
             _ => eprintln!("spotify: unknown option {k}"),
         }
     }
@@ -225,7 +227,8 @@ async fn main() {
         let key = std::fs::read_to_string(&a.soloist_key_file).map(|k| k.trim().to_string()).unwrap_or_default();
         let o = soloist::Opts { runtime: a.runtime.clone(), dir: a.dir.clone(), key, name: a.name.clone(), volume: a.volume,
                                 ws_port: a.ws_port, zc_port: a.port, audio_fd: a.audio_fd,
-                                    webapi: soloist::webapi_read(&a.webapi_file) };
+                                    webapi: soloist::webapi_read(&a.webapi_file),
+                                    machine_id: Some(a.machine_id.clone()).filter(|m| m.len() == 32 && m.bytes().all(|b| b.is_ascii_hexdigit())) };
         let mut lines = stdin_lines();
         soloist::run(o, &mut lines).await;
         soloist::end_child();

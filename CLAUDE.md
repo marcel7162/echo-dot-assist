@@ -428,15 +428,20 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   resolv.conf and CA bundle linked into `run/`.  Search with Soloist: the owner's Web API app (`webapi <sealed>` on the
   page's POST, `state/spotify/webapi` "id\nsecret" 0600, `--webapi-file`): a client-credentials token, `/v1/search`
   without a market (`search::url_app`), `search::pick`, `ctl activate` + `ctl play <uri>`; none: `fail nosearch`,
-  token refused: `fail webapi`.  Group (`ssgroup.c`, setting `spotify_group`): the Echo playing Spotify is a Sendspin
+  token refused: `fail webapi`.  Group (`ssgroup.c`, setting `spotify_group`): a second hassmic-spotify, the group's
+  speaker ("Alle Echos", `state/spotify/group_name`; `spotify_spawn_group`: folder `spotify/group`, zeroconf 28938,
+  Soloist control 28939, device id SHA-1 of node + " group", `--machine-id` its first 32 hex, which hmpulse.c's
+  open/fopen interposers serve as /etc/machine-id via HMPULSE_MACHINE_ID; librespot: avahi record `.group`), run by
+  ssgroup.c's own supervisor; its PCM, volume and controller commands are the group's; members left out by node in
+  `state/ssgroup.out` (page: `group_in|out <node>`, `group_name`, `group_logout` on POST /api/spotify, `group` in its
+  status).  This Echo is a Sendspin
   1.0 server (KKpsk2 initiator, `noise_kk_initiator_init`/`_write_msg1`/`_read_msg2`; key `state/ssgroup.key`) that
   dials every player of its arbitration network, its own on 127.0.0.1 included (`targets`: arb_members_json's IPs on
   our Sendspin port; `HASSMIC_SSGROUP_PEERS` for tests), category "lt" with `ssgroup_psk` = HMAC(arb_derive("sendspin
-  group v1"), server id), which `sendspin.c` `psk_select` takes as paired; spotify.c's PCM (`ssgroup_routing`: on and
-  in a network) resampled 44.1 -> 48 kHz (Catmull-Rom), 25 ms PCM chunks stamped 600 ms ahead in a 4 s ring,
+  group v1"), server id), which `sendspin.c` `psk_select` takes as paired; the group speaker's PCM resampled
+  44.1 -> 48 kHz (Catmull-Rom), 25 ms PCM chunks stamped 600 ms ahead in a 4 s ring,
   stream/start per stretch, stream/end on 300 ms without PCM, server/command volume from the app's, client/command
-  (controller role) -> spotify_pause/_resume/_skip; connections while playing and 30 s after.  No core_music(SPOTIFY)
-  while routed: the Echo's own Sendspin player is the music source.  `tests/fake_ssgroup.py` (three Echos).
+  (controller role) -> the group speaker's pause/resume/next/prev; connections while playing and 30 s after.  `tests/fake_ssgroup.py` (three Echos).
   PC: `HASSMIC_SOLOIST_RUNTIME`; `HASSMIC_SPOTIFY` (the binary; tests: `tests/fake_spotify.py`), `HASSMIC_SPOT`
   (its output file).  Builds byte for byte: paths remapped, SOURCE_DATE_EPOCH 0, VERGEN_IDEMPOTENT (content-id).
 - **Drop In** (`dropin.c`, `dropin.h`): calls between two Echos of the arbitration network. Signalling as signed

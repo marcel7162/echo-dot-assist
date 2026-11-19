@@ -38,7 +38,8 @@ pub struct Opts {
     pub ws_port: u16,
     pub zc_port: u16,
     pub audio_fd: i32,
-    pub webapi: Option<(String, String)>,   // the owner's Web API app (client id, secret): searches; Soloist has none
+    pub webapi: Option<(String, String)>,
+    pub machine_id: Option<String>,         // its own /etc/machine-id (hmpulse.c HMPULSE_MACHINE_ID): a second speaker   // the owner's Web API app (client id, secret): searches; Soloist has none
 }
 
 /// `--webapi-file`: client id and secret, a line each (hassmic's state/spotify/webapi, 0600)
@@ -273,7 +274,9 @@ fn spawn_soloist(o: &Opts, sh: &Arc<Shared>) -> Result<Child, String> {
     let ws = format!("127.0.0.1:{}", o.ws_port);
     // Soloist seals its stored login with its device id (/etc/machine-id): one kept under another id ("Empty
     // device_id; refusing to decrypt") left it neither logged in nor waiting for the app.  A new id: a fresh start
-    let mid = std::fs::read_to_string("/etc/machine-id").unwrap_or_default().trim().to_string();
+    let own = o.dir.join("machine-id.own");
+    if let Some(m) = &o.machine_id { let _ = std::fs::write(&own, format!("{m}\n")); }
+    let mid = match &o.machine_id { Some(m) => m.clone(), None => std::fs::read_to_string("/etc/machine-id").unwrap_or_default().trim().to_string() };
     let seen = o.dir.join("machine-id");
     if std::fs::read_to_string(&seen).unwrap_or_default().trim() != mid {
         if o.dir.join("data").exists() {
@@ -290,6 +293,7 @@ fn spawn_soloist(o: &Opts, sh: &Arc<Shared>) -> Result<Child, String> {
         .args(["-z", "200", "-i", &o.volume.to_string(), "-w", &ws])
         .env("HMPULSE_FD", audio.to_string()).env("HMPULSE_VOLUME", "report").env("HMPULSE_EVENTS_FD", ev_w_raw.to_string())
         .env("HMPULSE_ZC_PORT", o.zc_port.to_string())
+        .envs(o.machine_id.as_ref().map(|_| ("HMPULSE_MACHINE_ID", own.clone())))
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // the two descriptors Soloist's libpulse writes to: kept open across the exec (Rust opens its own with CLOEXEC)
     unsafe {

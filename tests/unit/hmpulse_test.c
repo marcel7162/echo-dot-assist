@@ -3,6 +3,8 @@
  * Checked: the context and the stream come up READY, the PCM arrives on HMPULSE_FD as s16le stereo at about real-time
  * pace (paced by the clock, not the pipe), the started callback fires, a cork stops it, the volume is reported
  * ("volume 50") and not applied with HMPULSE_VOLUME=report, and bind() gives a TCP socket on port 0 HMPULSE_ZC_PORT. */
+#include <errno.h>
+#include <fcntl.h>
 #include <pulse/pulseaudio.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -115,6 +117,17 @@ int main(void)
     int fd2 = socket(AF_INET, SOCK_STREAM, 0); struct sockaddr_in a2 = { .sin_family = AF_INET };
     bind(fd2, (struct sockaddr *)&a2, sizeof a2); l = sizeof a2; getsockname(fd2, (struct sockaddr *)&a2, &l);
     check(ntohs(a2.sin_port) != 28977 && ntohs(a2.sin_port) != 0, "a second one: the kernel's port, as before");
+
+    /* a second Soloist on one Echo (the group's speaker): its own machine-id, so its own Spotify device id */
+    char mp[] = "/tmp/hmpulse-mid-XXXXXX"; int mfd = mkstemp(mp); char mgot[64] = "";
+    if (mfd >= 0 && write(mfd, "0123456789abcdef0123456789abcdef\n", 33) == 33) close(mfd);
+    setenv("HMPULSE_MACHINE_ID", mp, 1);
+    FILE *mf = fopen("/etc/machine-id", "r"); if (mf) { if (!fgets(mgot, sizeof mgot, mf)) mgot[0] = 0; fclose(mf); }
+    int ofd = open("/var/lib/dbus/machine-id", O_RDONLY); char got2[64] = ""; if (ofd >= 0) { ssize_t k = read(ofd, got2, 32); got2[k > 0 ? k : 0] = 0; close(ofd); }
+    check(!strcmp(mgot, "0123456789abcdef0123456789abcdef\n") && !strcmp(got2, "0123456789abcdef0123456789abcdef"),
+          "HMPULSE_MACHINE_ID: /etc/machine-id and dbus's read from the speaker's own file (fopen and open)");
+    unsetenv("HMPULSE_MACHINE_ID"); unlink(mp);
+    FILE *hf = fopen("/etc/hostname", "r"); check(hf || errno == ENOENT, "other files open as before"); if (hf) fclose(hf);
 
     pa_stream_disconnect(s); pa_stream_unref(s);
     pa_context_disconnect(c); pa_context_unref(c);

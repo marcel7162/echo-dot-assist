@@ -5,7 +5,9 @@
 #define SPOTIFY_H
 #include <stddef.h>
 
-#define SPOTIFY_PORT 28933              /* zeroconf (TCP): the firewall's inbound range, beside 28931 (page) and 28932 (Drop In) */
+#define SPOTIFY_PORT 28933
+#define SPOTIFY_GROUP_PORT 28938        /* the group's speaker (ssgroup.c): zeroconf, Soloist's or librespot's */
+#define SPOTIFY_GROUP_WS_PORT 28939     /* its Soloist's control, 127.0.0.1 only */              /* zeroconf (TCP): the firewall's inbound range, beside 28931 (page) and 28932 (Drop In) */
 
 int  spotify_present(void);             /* the daemon is there to run (next to hassmic, or $HASSMIC_SPOTIFY): any thread */
 void spotify_start(void);               /* main(): the supervisor thread, after settings_load */
@@ -20,6 +22,10 @@ int  spotify_engine(int set);           /* index into spotify_engines: Soloist (
 extern const char *const spotify_engines[2];
 int  spotify_soloist_present(void);     /* Soloist's runtime came with this build (libpulse.so.0 next to the speaker) */
 int  spotify_set_key(const char *key);
+int  spotify_spawn_group(const char *name, int *in_w, int *out_r, int *aud_r);   /* ssgroup.c's speaker; -1 failed */
+int  spotify_group_engine_soloist(void);
+int  spotify_enabled(void);
+void spotify_group_mdns(int on, const char *name);   /* librespot's: avahi's record for the group's speaker */
 int  spotify_set_webapi(const char *id, const char *secret);   /* searches with Soloist (state/spotify/webapi, 0600); "" "" removes */  /* Soloist's developer API key (state/spotify/soloist.key, 0600); "" removes it */
 
 /* Lock held (core_lock): the core's hooks */

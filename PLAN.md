@@ -4489,3 +4489,11 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       (`tests/fake_ssgroup.py`): both players 3 ms apart in what they wrote, volume, a member's button.  Open, on the
       Echos: Wi-Fi bandwidth (PCM 1.5 Mbit/s a member: 2 members fine, Opus if more), the 600 ms lead on the tester's
       hotspot, the leader's CPU with Soloist + server + its own player.
+- [~] **The group as a speaker of its own, 2026-11-19.**  Tried on the Echos: it plays, but switching the setting to
+      choose between one Echo and all was impractical, and every member always played.  Now the setting runs a second
+      speaker, "Alle Echos", in the app (a second hassmic-spotify / Soloist: own folder, ports 28938/28939, device id;
+      Soloist reads its own machine-id through hmpulse.c's open/fopen interposers, `make unit-hmpulse`), and only its
+      music goes to the group; the Echo's own speaker plays on it alone again.  Members are picked on the page
+      (`state/ssgroup.out`: those left out, so new members join).  `tests/fake_ssgroup.py`: the second speaker's
+      arguments, its avahi record, both players 1 ms apart, leave out and take back, the button.  Open on the Echos:
+      two Soloists' memory and CPU on the Dot 2 (the second one idles until picked).

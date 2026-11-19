@@ -1,7 +1,10 @@
 /*
- * Spotify on every Echo: the Echo that runs Spotify (spotify.c) is a Sendspin server for the Echos of its arbitration
- * network, itself included, and each plays the music through its own Sendspin player (sendspin.c), in step: the
- * players already follow a server's clock to the millisecond (Kalman filter, a rate of their own; sendspin.c).
+ * Spotify on every Echo: with the setting on, this Echo runs a second Spotify speaker, "Alle Echos" in the Spotify app
+ * (hassmic-spotify again: a name, folder, ports 28938/28939 and a device id of its own; spotify_spawn_group), and is
+ * a Sendspin server for the Echos of its arbitration network the owner picked (state/ssgroup.out lists those left
+ * out), itself included; each plays that speaker's music through its own Sendspin player (sendspin.c), in step: the
+ * players already follow a server's clock to the millisecond (Kalman filter, a rate of their own; sendspin.c).  The
+ * Echo's own speaker stays as it was: picked in the app, it plays on this Echo alone.
  * Music Assistant does the same, but streams Spotify through librespot, which Spotify refuses some accounts (the
  * tester's Duo: every track's key), and its shared client id was rate limited into minutes a search.
  *
@@ -14,7 +17,8 @@
  *     stream/start (PCM 48 kHz stereo 16 bit), audio chunks of 25 ms stamped on our clock 600 ms ahead (the players
  *     report 300 ms lead time; the rest is Wi-Fi's), stream/end when Spotify stops, server/command volume when the
  *     Spotify app's slider moves (each Echo then at the app's volume), server/state with the controller's commands;
- *   - client/command from a player's controller (its action button, multi presses, "<wake word>, stop"): to Spotify.
+ *   - client/command from a player's controller (its action button, multi presses, "<wake word>, stop"): to the
+ *     group's speaker.
  * Spotify's 44.1 kHz goes to 48 kHz here (cubic, as resample.c's interpolation): the players only take 48 kHz.
  * Chunks wait in a ring of 4 s; a player that connects late starts with what is still ahead of its time.  A source
  * that stalls (Wi-Fi to Spotify, a skip) shifts the timeline on: the players read a jump as a gap, as from aiosendspin.
@@ -28,7 +32,10 @@
 #include "statefile.h"
 #include "ws.h"
 #include <errno.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
+#include <sys/stat.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -71,8 +78,160 @@ static long long now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC
 static long long now_ms(void) { return now_us() / 1000; }
 
 int ssgroup_enable(int set) { if (set >= 0) atomic_store(&enabled, set != 0); return atomic_load(&enabled); }
-/* not in a network: nobody could take the music, this Echo plays it itself as before */
-int ssgroup_routing(void) { return atomic_load(&enabled) && server_id[0] && atomic_load(&net_ok); }
+
+/* ---------------------------------------------------------------- the group's speaker */
+
+static pthread_mutex_t spk = PTHREAD_MUTEX_INITIALIZER;
+static int spk_in = -1, spk_running, spk_logged, spk_playing; static pid_t spk_pid;
+static char spk_user[128], spk_title[200], spk_artist[200], spk_error[64], spk_name[80] = "Alle Echos";
+static atomic_int spk_restart;
+
+static const char *sdir(void) { const char *d = getenv("HASSMIC_STATE"); return d ? d : "/data/local/hassmic/state"; }
+
+static void spk_send(const char *l)
+{
+    pthread_mutex_lock(&spk);
+    if (spk_in >= 0) { char b[300]; int n = snprintf(b, sizeof b, "%s\n", l); if (write(spk_in, b, (size_t)n) < 0) {} }
+    pthread_mutex_unlock(&spk);
+}
+
+static void spk_event(char *l)
+{
+    if (!strncmp(l, "pid ", 4)) { pthread_mutex_lock(&spk); spk_pid = (pid_t)atoi(l + 4); pthread_mutex_unlock(&spk); return; }
+    if (strncmp(l, "track ", 6)) fprintf(stderr, "ssgroup: speaker < %s\n", l);
+    pthread_mutex_lock(&spk);
+    if (!strcmp(l, "ready") && !spotify_group_engine_soloist()) { pthread_mutex_unlock(&spk); spotify_group_mdns(1, spk_name); return; }
+    if (!strncmp(l, "login ", 6)) { spk_logged = strcmp(l + 6, "-") != 0; snprintf(spk_user, sizeof spk_user, "%s", spk_logged ? l + 6 : ""); if (spk_logged) spk_error[0] = 0; }
+    else if (!strncmp(l, "state ", 6)) spk_playing = !strcmp(l + 6, "playing");
+    else if (!strncmp(l, "track ", 6)) {
+        char *t = l + 6, *a = strchr(t, '\t'); if (a) *a++ = 0;
+        char *e = a ? strchr(a, '\t') : NULL; if (e) *e = 0;
+        snprintf(spk_title, sizeof spk_title, "%s", t); snprintf(spk_artist, sizeof spk_artist, "%s", a ? a : "");
+    }
+    else if (!strncmp(l, "error ", 6)) snprintf(spk_error, sizeof spk_error, "%s", l + 6);
+    pthread_mutex_unlock(&spk);
+    if (!strncmp(l, "volume ", 7)) ssgroup_volume(atoi(l + 7));       /* the app's slider: every Echo of the group */
+}
+
+static void *spk_audio(void *arg)
+{
+    int fd = (int)(long)arg; static int16_t buf[4096]; size_t have = 0;
+    for (;;) {
+        struct pollfd p = { fd, POLLIN, 0 };
+        int r = poll(&p, 1, 300);
+        if (r < 0 && errno == EINTR) continue;
+        if (r == 0) { ssgroup_idle(); continue; }      /* 300 ms without PCM: paused, stopped or between sessions */
+        ssize_t n = read(fd, (char *)buf + have, sizeof buf - have);
+        if (n <= 0) { if (n < 0 && errno == EINTR) continue; break; }
+        have += (size_t)n;
+        size_t frames = have / 4;
+        if (!frames) continue;
+        ssgroup_pcm(buf, frames);
+        have -= frames * 4;
+        if (have) memmove(buf, (char *)buf + frames * 4, have);
+    }
+    ssgroup_idle();
+    close(fd);
+    return NULL;
+}
+
+static void name_load(void)
+{
+    char p[300]; FILE *f; snprintf(p, sizeof p, "%s/spotify/group_name", sdir());
+    if ((f = fopen(p, "r"))) { char n[80]; if (fgets(n, sizeof n, f)) { n[strcspn(n, "\r\n")] = 0; if (n[0]) { pthread_mutex_lock(&spk); snprintf(spk_name, sizeof spk_name, "%s", n); pthread_mutex_unlock(&spk); } } fclose(f); }
+}
+
+static void *spk_supervisor(void *arg)
+{
+    (void)arg; int backoff = 5;
+    name_load();
+    for (;;) {
+        atomic_store(&spk_restart, 0);
+        if (!atomic_load(&enabled) || !spotify_enabled()) { while (!atomic_load(&spk_restart) && (!atomic_load(&enabled) || !spotify_enabled())) usleep(300000); continue; }
+        int in_w, out_r, aud_r; char nm[80];
+        pthread_mutex_lock(&spk); snprintf(nm, sizeof nm, "%s", spk_name); pthread_mutex_unlock(&spk);
+        if (spotify_spawn_group(nm, &in_w, &out_r, &aud_r)) { fprintf(stderr, "ssgroup: the group's speaker would not start\n"); sleep(10); continue; }
+        fprintf(stderr, "ssgroup: the group's speaker \"%s\" started\n", nm);
+        long long started = now_ms();
+        pthread_t at; pthread_create(&at, NULL, spk_audio, (void *)(long)aud_r);
+        pthread_mutex_lock(&spk); spk_in = in_w; spk_running = 1; spk_logged = spk_playing = 0; spk_error[0] = 0; pthread_mutex_unlock(&spk);
+        char line[2048]; size_t have = 0; int quit = 0; long long quit_at = 0;
+        for (;;) {
+            if (!quit && (atomic_load(&spk_restart) || !atomic_load(&enabled) || !spotify_enabled())) { spk_send("quit"); quit = 1; quit_at = now_ms(); }
+            if (quit && now_ms() - quit_at > 5000) { pthread_mutex_lock(&spk); pid_t k = spk_pid; pthread_mutex_unlock(&spk); if (k > 0) kill(k, SIGKILL); quit_at = now_ms(); }
+            struct pollfd p = { out_r, POLLIN, 0 };
+            int r = poll(&p, 1, 200);
+            if (r < 0 && errno != EINTR) break;
+            if (r <= 0) continue;
+            ssize_t n = read(out_r, line + have, sizeof line - 1 - have);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) break;
+            have += (size_t)n; line[have] = 0;
+            char *s = line, *e;
+            while ((e = strchr(s, '\n'))) { *e = 0; spk_event(s); s = e + 1; }
+            have -= (size_t)(s - line); memmove(line, s, have);
+            if (have == sizeof line - 1) have = 0;
+        }
+        close(out_r);
+        pthread_mutex_lock(&spk); close(spk_in); spk_in = -1; spk_running = spk_playing = 0; pid_t was = spk_pid; spk_pid = 0; pthread_mutex_unlock(&spk);
+        if (was > 0) kill(was, SIGTERM);
+        pthread_join(at, NULL);
+        spotify_group_mdns(0, "");
+        fprintf(stderr, "ssgroup: the group's speaker ended\n");
+        if (!quit && now_ms() - started < 60000) { for (int i = 0; i < backoff * 5 && !atomic_load(&spk_restart); i++) usleep(200000); backoff = backoff * 2 > 60 ? 60 : backoff * 2; }
+        else backoff = 5;
+    }
+    return NULL;
+}
+
+int ssgroup_set_name(const char *n)
+{
+    size_t l = strlen(n);
+    if (l > 79) return -1;
+    for (const char *c = n; *c; c++) if ((unsigned char)*c < ' ' || *c == '<' || *c == '>' || *c == '&') return -1;
+    char p[300]; snprintf(p, sizeof p, "%s/spotify", sdir()); mkdir(p, 0700);
+    snprintf(p, sizeof p, "%s/spotify/group_name", sdir());
+    if (statefile_write(p, 0600, n, l)) return -1;
+    pthread_mutex_lock(&spk); snprintf(spk_name, sizeof spk_name, "%s", l ? n : "Alle Echos"); pthread_mutex_unlock(&spk);
+    atomic_store(&spk_restart, 1);
+    return 0;
+}
+
+void ssgroup_logout(void)
+{
+    spk_send("logout");
+    pthread_mutex_lock(&spk); spk_logged = 0; spk_user[0] = 0; pthread_mutex_unlock(&spk);
+}
+
+/* Echos left out of the group, a node name a line (state/ssgroup.out): new members join by themselves */
+static pthread_mutex_t outl = PTHREAD_MUTEX_INITIALIZER;
+static char out_nodes[16][64]; static int n_out, out_loaded;
+static void out_load(void)
+{
+    char p[300]; FILE *f; snprintf(p, sizeof p, "%s/ssgroup.out", sdir());
+    n_out = 0;
+    if ((f = fopen(p, "r"))) { char l[64]; while (n_out < 16 && fgets(l, sizeof l, f)) { l[strcspn(l, "\r\n")] = 0; if (l[0]) snprintf(out_nodes[n_out++], 64, "%s", l); } fclose(f); }
+    out_loaded = 1;
+}
+static int is_out(const char *node)
+{
+    pthread_mutex_lock(&outl); if (!out_loaded) out_load();
+    int r = 0; for (int i = 0; i < n_out; i++) if (!strcmp(out_nodes[i], node)) r = 1;
+    pthread_mutex_unlock(&outl); return r;
+}
+int ssgroup_member(const char *node, int in)
+{
+    if (!node[0] || strlen(node) > 63 || strchr(node, '\n')) return -1;
+    pthread_mutex_lock(&outl); if (!out_loaded) out_load();
+    int k = 0; for (int i = 0; i < n_out; i++) if (strcmp(out_nodes[i], node)) memmove(out_nodes[k++], out_nodes[i], 64);
+    n_out = k;
+    if (!in && n_out < 16) snprintf(out_nodes[n_out++], 64, "%s", node);
+    char p[300], b[16 * 65]; size_t o = 0; snprintf(p, sizeof p, "%s/ssgroup.out", sdir());
+    for (int i = 0; i < n_out; i++) o += (size_t)snprintf(b + o, sizeof b - o, "%s\n", out_nodes[i]);
+    int r = statefile_write(p, 0600, b, o);
+    pthread_mutex_unlock(&outl);
+    return r;
+}
 int ssgroup_is_self(const char *id) { return server_id[0] && id && !strcmp(id, server_id); }
 
 int ssgroup_psk(const char *id, uint8_t out[32])
@@ -246,13 +405,11 @@ static void on_json(struct conn *c, const char *j, long long t_recv)
     } else if (!strcmp(type, "client/state")) {
         c->state_seen = 1;
     } else if (!strcmp(type, "client/command") && jstr(j, "command", cmd, sizeof cmd)) {
-        /* a player's button or "stop": Spotify's (core_lock: spotify.c's hooks run with it held) */
-        pthread_mutex_lock(&core_lock);
-        if (!strcmp(cmd, "pause") || !strcmp(cmd, "stop")) spotify_pause();
-        else if (!strcmp(cmd, "play")) spotify_resume();
-        else if (!strcmp(cmd, "next")) spotify_skip(1);
-        else if (!strcmp(cmd, "previous")) spotify_skip(-1);
-        pthread_mutex_unlock(&core_lock);
+        /* a player's button or "stop": the group's speaker's */
+        if (!strcmp(cmd, "pause") || !strcmp(cmd, "stop")) spk_send("pause");
+        else if (!strcmp(cmd, "play")) spk_send("resume");
+        else if (!strcmp(cmd, "next")) spk_send("next");
+        else if (!strcmp(cmd, "previous")) spk_send("prev");
         fprintf(stderr, "ssgroup: %s from %s\n", cmd, c->self ? "this Echo" : c->ip);
     } else if (!strcmp(type, "client/goodbye")) {
         atomic_store(&c->stop, 1);
@@ -343,28 +500,79 @@ out:
 
 /* ---------------------------------------------------------------- who is in the group */
 
-/* "host:port" of every player: ours first, then the members' from arb_members_json ([{"node":..,"ip":..},...]) on
- * the same port as ours (every hassmic's default).  HASSMIC_SSGROUP_PEERS="host:port,..." (tests: Echos on one PC,
- * ours first) instead */
-static int targets(char ips[][24], int max)
+/* Every player of the network: node name and "host:port", ours first, then the members' from arb_members_json
+ * ([{"node":..,"ip":..},...]) on our Sendspin port (every hassmic's default).  HASSMIC_SSGROUP_PEERS="node@host:port,..."
+ * (tests: Echos on one PC, ours first) instead */
+static int members(char ips[][24], char nodes[][64], int max)
 {
     static char js[4096]; int n = 0; const char *e = getenv("HASSMIC_SSGROUP_PEERS");
     if (e) {
         for (const char *p = e; *p && n < max; ) {
-            size_t l = strcspn(p, ",");
-            if (l > 0 && l < 24) { memcpy(ips[n], p, l); ips[n][l] = 0; n++; }
+            size_t l = strcspn(p, ","); char it[96];
+            if (l > 0 && l < sizeof it) {
+                memcpy(it, p, l); it[l] = 0;
+                char *at = strchr(it, '@');
+                snprintf(nodes[n], 64, "%s", at ? (*at = 0, it) : n ? "peer" : core_node_name());
+                snprintf(ips[n], 24, "%s", at ? at + 1 : it); n++;
+            }
             p += l; if (*p) p++;
         }
         return n;
     }
-    snprintf(ips[n++], 24, "127.0.0.1:%d", atomic_load(&ss_port));
+    snprintf(nodes[n], 64, "%s", core_node_name()); snprintf(ips[n++], 24, "127.0.0.1:%d", atomic_load(&ss_port));
     arb_members_json(js, sizeof js);
-    for (const char *p = js; n < max && (p = strstr(p, "\"ip\":\"")); ) {
-        p += 6; size_t l = strcspn(p, "\"");
-        if (l > 0 && l < 16) { snprintf(ips[n], 24, "%.*s:%d", (int)l, p, atomic_load(&ss_port)); n++; }
-        p += l;
+    for (const char *p = js; n < max && (p = strstr(p, "{\"node\":\"")); ) {
+        p += 9; size_t l = strcspn(p, "\"");
+        snprintf(nodes[n], 64, "%.*s", (int)(l < 63 ? l : 63), p);
+        const char *q = strstr(p, "\"ip\":\""); if (!q) break;
+        q += 6; size_t m = strcspn(q, "\"");
+        if (m > 0 && m < 16) { snprintf(ips[n], 24, "%.*s:%d", (int)m, q, atomic_load(&ss_port)); n++; }
+        p = q + m;
     }
     return n;
+}
+
+/* the players to serve: the members not left out */
+static int targets(char ips[][24], int max)
+{
+    char all[MAX_CONN][24], nodes[MAX_CONN][64]; int n = members(all, nodes, MAX_CONN), k = 0;
+    for (int i = 0; i < n && k < max; i++) if (!is_out(nodes[i])) snprintf(ips[k++], 24, "%s", all[i]);
+    return k;
+}
+
+static void jesc(char *o, size_t cap, const char *s)
+{
+    size_t k = 0;
+    for (; *s && k + 7 < cap; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '"' || c == '\\') { o[k++] = '\\'; o[k++] = (char)c; }
+        else if (c < 0x20) k += (size_t)snprintf(o + k, cap - k, "\\u%04x", c);
+        else o[k++] = (char)c;
+    }
+    o[k] = 0;
+}
+
+size_t ssgroup_status_json(char *out, size_t cap)
+{
+    char u[260], t[400], a[400], e[130], nm[170], ips[MAX_CONN][24], nodes[MAX_CONN][64];
+    int n = members(ips, nodes, MAX_CONN);
+    pthread_mutex_lock(&spk);
+    jesc(u, sizeof u, spk_user); jesc(t, sizeof t, spk_title); jesc(a, sizeof a, spk_artist); jesc(e, sizeof e, spk_error); jesc(nm, sizeof nm, spk_name);
+    int run = spk_running, li = spk_logged, pl = spk_playing;
+    pthread_mutex_unlock(&spk);
+    size_t o = (size_t)snprintf(out, cap, "{\"on\":%d,\"network\":%d,\"running\":%d,\"logged_in\":%d,\"user\":\"%s\",\"playing\":%d,\"title\":\"%s\","
+                                "\"artist\":\"%s\",\"error\":\"%s\",\"name\":\"%s\",\"port\":%d,\"members\":[",
+                                atomic_load(&enabled), atomic_load(&net_ok), run, li, u, pl, t, a, e, nm, SPOTIFY_GROUP_PORT);
+    for (int i = 0; i < n && o < cap; i++) {
+        int joined = 0;
+        pthread_mutex_lock(&cl);
+        for (int k = 0; k < MAX_CONN; k++) if (conns[k] && atomic_load(&conns[k]->alive) && conns[k]->state_seen && !strcmp(conns[k]->ip, ips[i])) joined = 1;
+        pthread_mutex_unlock(&cl);
+        char nd[140]; jesc(nd, sizeof nd, nodes[i]);
+        o += (size_t)snprintf(out + o, cap - o, "%s{\"node\":\"%s\",\"self\":%d,\"in\":%d,\"joined\":%d}", i ? "," : "", nd, i == 0, !is_out(nodes[i]), joined);
+    }
+    if (o < cap) o += (size_t)snprintf(out + o, cap - o, "]}");
+    return o < cap ? o : cap - 1;
 }
 
 static void key_load(void)
@@ -420,8 +628,9 @@ static void *manager(void *arg)
 
 void ssgroup_start(int port)
 {
-    pthread_t t;
+    pthread_t t, u;
     atomic_store(&ss_port, port ? port : 28928);
     key_load();
     if (!pthread_create(&t, NULL, manager, NULL)) pthread_detach(t);
+    if (!pthread_create(&u, NULL, spk_supervisor, NULL)) pthread_detach(u);
 }

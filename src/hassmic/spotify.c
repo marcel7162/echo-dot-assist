@@ -293,7 +293,8 @@ static size_t jesc(char *out, size_t cap, const char *s)
 
 size_t spotify_status_json(char *out, size_t cap)
 {
-    char u[260], t[3][330], r[330], nm[170], dn[170], e[330];
+    char u[260], t[3][330], r[330], nm[170], dn[170], e[330]; static char g[3000];
+    ssgroup_status_json(g, sizeof g);
     pthread_mutex_lock(&sl);
     jesc(u, sizeof u, user); for (int i = 0; i < 3; i++) jesc(t[i], sizeof t[i], track[i]);
     jesc(r, sizeof r, result); jesc(nm, sizeof nm, name); jesc(dn, sizeof dn, core_name); jesc(e, sizeof e, last_error);
@@ -302,9 +303,9 @@ size_t spotify_status_json(char *out, size_t cap)
     return (size_t)snprintf(out, cap,
         "{\"present\":%d,\"enabled\":%d,\"running\":%d,\"ready\":%d,\"logged_in\":%d,\"user\":\"%s\",\"playing\":%d,"
         "\"title\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\",\"result\":\"%s\",\"result_age\":%lld,\"name\":\"%s\","
-        "\"default_name\":\"%s\",\"port\":%d,\"error\":\"%s\",\"engine\":\"%s\",\"soloist\":%d,\"has_key\":%d,\"has_webapi\":%d}",
+        "\"default_name\":\"%s\",\"port\":%d,\"error\":\"%s\",\"engine\":\"%s\",\"soloist\":%d,\"has_key\":%d,\"has_webapi\":%d,\"group\":%s}",
         spotify_present(), atomic_load(&enabled), run, rd, li, u, pl, t[0], t[1], t[2], r, age, nm, dn,
-        use_soloist() ? SOLOIST_ZC_PORT : SPOTIFY_PORT, e, use_soloist() ? "soloist" : "librespot", spotify_soloist_present(), has_key(), has_webapi());
+        use_soloist() ? SOLOIST_ZC_PORT : SPOTIFY_PORT, e, use_soloist() ? "soloist" : "librespot", spotify_soloist_present(), has_key(), has_webapi(), g);
 }
 
 /* ---------------------------------------------------------------- mDNS */
@@ -326,6 +327,21 @@ static void mdns_write(int on)
     if (statefile_commit(&s)) fprintf(stderr, "spotify: cannot write %s\n", mdns_path());
 }
 
+void spotify_group_mdns(int on, const char *name)
+{
+    char p[320]; const char *e = getenv("HASSMIC_SPOTIFY_MDNS");
+    if (e) snprintf(p, sizeof p, "%s.group", e); else snprintf(p, sizeof p, "/data/misc/avahi/services/hassmic-spotify-group.service");
+    if (!on) { unlink(p); return; }
+    struct statefile s;
+    if (statefile_open(&s, p, 0644)) return;
+    fchmod(fileno(s.f), 0644);
+    fprintf(s.f, "<?xml version=\"1.0\" standalone='no'?>\n<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">\n"
+            "<service-group>\n  <name>%s</name>\n  <service><type>_spotify-connect._tcp</type><port>%d</port>\n"
+            "    <txt-record>VERSION=1.0</txt-record><txt-record>CPath=/</txt-record><txt-record>Stack=SP</txt-record>\n"
+            "  </service>\n</service-group>\n", name, SPOTIFY_GROUP_PORT);
+    statefile_commit(&s);
+}
+
 /* ---------------------------------------------------------------- audio */
 
 static void *audio_thread(void *arg)
@@ -339,7 +355,6 @@ static void *audio_thread(void *arg)
         if (r < 0 && errno == EINTR) continue;
         if (r == 0) {                                   /* 300 ms without PCM: paused, stopped or between sessions */
             if (open_) { spot_close(); open_ = 0; core_music(MUSIC_SPOTIFY, 0); fprintf(stderr, "spotify: output closed\n"); }
-            ssgroup_idle();
             continue;
         }
         ssize_t n = read(fd, (char *)buf + have, sizeof buf - have);
@@ -347,15 +362,6 @@ static void *audio_thread(void *arg)
         have += (size_t)n;
         size_t frames = have / FRAME;
         if (!frames) continue;
-        if (ssgroup_routing()) {
-            /* Spotify on every Echo (ssgroup.c): this Echo plays it as the group's member, through its Sendspin player,
-             * which ducks it and feeds the ring; no stream of its own, no core_music (that is the player's) */
-            if (open_) { spot_close(); open_ = 0; core_music(MUSIC_SPOTIFY, 0); }
-            ssgroup_pcm(buf, frames);
-            have -= frames * FRAME;
-            if (have) memmove(buf, (char *)buf + frames * FRAME, have);
-            continue;
-        }
         if (!open_) {
             if (spot_open(RATE, 2)) { fprintf(stderr, "spotify: cannot open the output\n"); usleep(200000); have = 0; continue; }
             open_ = 1; core_music(MUSIC_SPOTIFY, 1); fprintf(stderr, "spotify: output open\n");
@@ -383,9 +389,9 @@ static void device_id(char out[41])
     for (int i = 0; i < 20; i++) sprintf(out + 2 * i, "%02x", h[i]);
 }
 
+static int exec_speaker(char *const argv[], int *in_w, int *out_r, int *aud_r);
 static int spawn(int *in_w, int *out_r, int *aud_r)
 {
-    int pin[2], pout[2], paud[2];
     char dir[300], did[41], vol[8], br[8], nm[80];
     dir_path(dir, sizeof dir); mkdir(dir, 0700);
     device_id(did); shown_name(nm, sizeof nm);
@@ -401,6 +407,40 @@ static int spawn(int *in_w, int *out_r, int *aud_r)
                      "--normalise", atomic_load(&normalise) ? "1" : "0", "--volume", vol, "--audio-fd", "3",
                      "--engine", sol ? "soloist" : "librespot", "--runtime", getenv("HASSMIC_SOLOIST_RUNTIME") ? getenv("HASSMIC_SOLOIST_RUNTIME") : rt,
                      "--soloist-key-file", key, "--ws-port", wsp, "--webapi-file", wa, NULL };
+    return exec_speaker(argv, in_w, out_r, aud_r);
+}
+
+/* The group's speaker (ssgroup.c): the same program, a name, folder, ports and device id of its own (machine-id for
+ * Soloist: hmpulse.c), its music for the group's server instead of this Echo's stream */
+int spotify_spawn_group(const char *name, int *in_w, int *out_r, int *aud_r)
+{
+    char dir[300], did[41], mid[33], vol[8], br[8], nm[80], rt[PATH_MAX], key[300], wa[300], port[8], wsp[8];
+    uint8_t h[20]; char seed[120];
+    if (!spotify_present()) return -1;
+    dir_path(dir, sizeof dir); mkdir(dir, 0700); strncat(dir, "/group", sizeof dir - strlen(dir) - 1); mkdir(dir, 0700);
+    snprintf(seed, sizeof seed, "%s group", core_node_name()); sha1(seed, strlen(seed), h);
+    for (int i = 0; i < 20; i++) sprintf(did + 2 * i, "%02x", h[i]);
+    memcpy(mid, did, 32); mid[32] = 0;
+    snprintf(nm, sizeof nm, "%s", name);
+    pthread_mutex_lock(&core_lock); int v = core_volume(); pthread_mutex_unlock(&core_lock);
+    snprintf(vol, sizeof vol, "%d", v); snprintf(br, sizeof br, "%s", spotify_bitrates[atomic_load(&bitrate)]);
+    int sol = use_soloist();
+    snprintf(port, sizeof port, "%d", SPOTIFY_GROUP_PORT); snprintf(wsp, sizeof wsp, "%d", SPOTIFY_GROUP_WS_PORT);
+    runtime_dir(rt, sizeof rt); key_path(key, sizeof key); webapi_path(wa, sizeof wa);
+    const char *b = bin();
+    char *argv[] = { (char *)b, "--name", nm, "--dir", dir, "--port", port, "--device-id", did, "--bitrate", br,
+                     "--normalise", atomic_load(&normalise) ? "1" : "0", "--volume", vol, "--audio-fd", "3",
+                     "--engine", sol ? "soloist" : "librespot", "--runtime", getenv("HASSMIC_SOLOIST_RUNTIME") ? getenv("HASSMIC_SOLOIST_RUNTIME") : rt,
+                     "--soloist-key-file", key, "--ws-port", wsp, "--webapi-file", wa, "--machine-id", mid, NULL };
+    return exec_speaker(argv, in_w, out_r, aud_r);
+}
+int spotify_group_engine_soloist(void) { return use_soloist(); }
+int spotify_enabled(void) { return atomic_load(&enabled); }
+
+/* hassmic-spotify on three pipes (stdin, stdout, PCM on fd 3), its grandchild's pid as the first line on stdout */
+static int exec_speaker(char *const argv[], int *in_w, int *out_r, int *aud_r)
+{
+    int pin[2], pout[2], paud[2];
     if (pipe2(pin, O_CLOEXEC)) return -1;
     if (pipe2(pout, O_CLOEXEC)) { close(pin[0]); close(pin[1]); return -1; }
     if (pipe2(paud, O_CLOEXEC)) { close(pin[0]); close(pin[1]); close(pout[0]); close(pout[1]); return -1; }
@@ -466,7 +506,6 @@ static void event(char *l)
         pthread_mutex_lock(&sl); last_volume = v; pthread_mutex_unlock(&sl);
         pthread_mutex_lock(&core_lock);
         if (core_volume() != v) core_set_volume(v);
-        if (ssgroup_routing()) ssgroup_volume(v);       /* every Echo of the group at the app's volume */
         pthread_mutex_unlock(&core_lock);
         return;
     }

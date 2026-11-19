@@ -60,6 +60,7 @@
 #include "netio.h"
 #include "settings.h"
 #include "spotify.h"
+#include "ssgroup.h"
 #include "sounds.h"
 #include "soundpack.h"
 #include "update.h"
@@ -1267,6 +1268,13 @@ static void handle(int fd)
             crypto_wipe(k, sizeof k); crypto_wipe(sealed, sizeof sealed);
             if (bad) { respond_sjson(fd, &r, 400, "{\"error\":\"not a Client ID and Secret\"}"); free(r.body); return; }
         } else if (!strcmp(t, "logout")) spotify_logout();
+        else if (!strncmp(t, "group_name", 10) && (!t[10] || t[10] == ' ')) {      /* the group's speaker (ssgroup.c) */
+            if (ssgroup_set_name(t[10] ? t + 11 : "")) { respond_sjson(fd, &r, 400, "{\"error\":\"a name of up to 79 bytes, without < > &\"}"); free(r.body); return; }
+        } else if (!strcmp(t, "group_logout")) ssgroup_logout();
+        else if (!strncmp(t, "group_in ", 9) || !strncmp(t, "group_out ", 10)) {
+            int in = t[6] == 'i';
+            if (ssgroup_member(t + (in ? 9 : 10), in)) { respond_sjson(fd, &r, 400, "{\"error\":\"bad request\"}"); free(r.body); return; }
+        }
         else if (!strncmp(t, "say ", 4)) {
             pthread_mutex_lock(&core_lock); int took = spotify_command(t + 4, ""); pthread_mutex_unlock(&core_lock);
             if (!took) { respond_sjson(fd, &r, 200, "{\"said\":false}"); free(r.body); return; }

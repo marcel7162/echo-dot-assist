@@ -273,7 +273,7 @@ const HELP = {
   spotify_bitrate: { parent: 'spotify', help: 'Spotify\'s Ogg Vorbis quality. 320 kbit/s sounds best and uses about 145 MB an hour; 96 kbit/s suits a weak Wi-Fi. The speaker starts again when you change it.' },
   spotify_normalise: { parent: 'spotify', help: 'Plays every track at about the same loudness, as the Spotify app\'s "Normalise volume". The speaker starts again when you change it.' },
   sendspin_unpaired: { help: 'Lets any Music Assistant server on the network play here without pairing. Off: only a server given this Echo\'s "Sendspin pairing token" (a diagnostic entity in Home Assistant) may play.' },
-  spotify_group: { help: 'Spotify picked on this Echo plays on every Echo of its network (the Echos page; the same network wake word arbitration uses), in step like a Music Assistant group: this Echo sends the music, each Echo plays it at its own volume, and the volume slider in the Spotify app sets all of them. The action button and "<wake word>, stop" on any of them pause it, two and three presses skip. The music starts about half a second after the app shows it. Switch it on on the Echo you play Spotify on; the others need nothing switched on, only a current version. Off: Spotify plays on this Echo only.' },
+  spotify_group: { help: 'A second speaker in the Spotify app, "Alle Echos" (rename it below): picked there, it plays on every Echo of this Echo\'s network you tick below (the Echos page; the same network wake word arbitration uses), in step like a Music Assistant group. This Echo sends the music; the volume slider in the Spotify app sets every Echo of the group; the action button and "<wake word>, stop" on any of them pause it, two and three presses skip. Picking this Echo itself in the app still plays on this Echo alone. The music starts about half a second after the app shows it. Switch it on on one Echo only (each would add a speaker of its own); the others need nothing switched on, only a current version. Pick the new speaker once in the app to log it in, as with the Echo.' },
   ntp_time: { help: 'An Echo\'s clock starts wrong after a power cut, and without the right date nothing that uses HTTPS works: Spotify, online updates, replies from an HTTPS Home Assistant. On (the default): the Echo asks public time servers (pool.ntp.org, then Cloudflare\'s and Google\'s) while its clock is not set, and twice a day after; Home Assistant\'s time, once it is connected, is taken over it. Off: only Home Assistant sets the clock; the time servers never hear from this Echo.' },
   https_verify: { help: 'Whether the Echo checks the certificate of a Home Assistant that serves HTTPS itself. Home Assistant then gives the Echo https:// addresses for its spoken replies and announcements, usually its external URL. On (the default): the Echo plays them only from a server whose certificate a known authority signed for that very name, as a browser would. A self-signed certificate, or one that does not name the address Home Assistant gives out, is refused: replies stay silent and the log says why. Off: any certificate is taken, so someone on your network could pass the Echo audio of their own instead of Home Assistant\'s. Plain http:// addresses are not affected.' },
   kiosk_internet: { help: 'Kiosk Satellite may reach the internet while this is on: for its own updates and for web pages it shows (iframes, dashboards). Only that app gets out: the Echo\'s own voice satellite stays on your network except for what it needs, and Amazon\'s software stays cut off. Off: it reaches your network only, so it shows Home Assistant but cannot update itself or load outside pages. On by default. Takes effect within seconds.' },
@@ -491,7 +491,7 @@ const SUB = {
   spotify_normalise: 'librespot only: every track at about the same loudness',
   https_verify: 'Checks the certificate of an HTTPS Home Assistant',
   ntp_time: 'Sets the clock from NTP servers until Home Assistant does',
-  spotify_group: 'Plays this Echo\'s Spotify on all your Echos, in step',
+  spotify_group: 'A speaker "Alle Echos" in the Spotify app: plays on all of them, in step',
   kiosk_internet: 'Kiosk Satellite may reach the internet',
   kiosk_mic: 'Kiosk Satellite may use the microphone',
   kiosk_camera: 'Kiosk Satellite may use the camera, also to scan a QR code',
@@ -3140,6 +3140,31 @@ function spotifyCard(list) {
     waRow.classList.toggle('hidden', sp.engine !== 'soloist');
     waVal.replaceChildren(sp.has_webapi ? 'Set' : 'Not set: searching by voice is off');
   } };
+  // the group's speaker (ssgroup.c): its state, its name in the app, which Echos play along
+  const grpVal = h('div', { class: 'row-val' }), grpBtns = h('span', { class: 'btns' }), memBtns = h('span', { class: 'btns' }), memVal = h('div', { class: 'row-val' });
+  const grpRow = infoRow('Group speaker', 'The speaker that plays on every Echo below', 'Pick it in the Spotify app like any speaker; the first time that logs it in (it keeps its own login, so another account may use it). What it plays goes to the ticked Echos, in step.', grpBtns, null, grpVal);
+  const memRow = infoRow('Echos in the group', 'Which Echos play the group\'s music', 'Every Echo of this Echo\'s network (the Echos page). Tap one to leave it out or take it back; an Echo that joins the network later plays along until you leave it out. "playing" marks those that are connected while music plays.', memBtns, null, memVal);
+  extra.append(grpRow, memRow);
+  const paintGroup = () => {
+    const sp = state.spotify || {}, g = sp.group || {};
+    grpRow.classList.toggle('hidden', !g.on); memRow.classList.toggle('hidden', !g.on);
+    if (!g.on) return;
+    const what = !g.network ? 'Not in a network: join the Echos together first (the Echos page)' : !g.running ? (g.error ? `Not running (${g.error})` : 'Starting…')
+      : g.logged_in ? `Logged in as ${g.user}` : `Not logged in: pick "${g.name}" in the Spotify app`;
+    const sub = [g.error && g.running ? SPOT_ERR[g.error] || g.error : null, g.playing && g.title ? `Playing ${g.artist ? g.artist + ' – ' : ''}${g.title}` : null].filter(Boolean);
+    grpVal.replaceChildren(`"${g.name}": ${what}`, h('span', { class: 'row-val-sub' }, sub.join(' · ')));
+    grpBtns.replaceChildren(h('button', { onclick: async () => {
+      const v = await ask({ title: 'Group speaker\'s name', ok: 'Save', check: (x) => /[<>&]/.test(x) ? 'Without < > &' : null,
+        body: ['How the group is listed in the Spotify app. The speaker starts again with it.'], input: { label: 'Name (empty: Alle Echos)', value: g.name || '', max: 79 } });
+      if (v !== null) spotSend(`group_name ${v.trim()}`.trim(), 'Saved: the group\'s speaker starts again with that name');
+    } }, 'Rename…'), g.logged_in ? h('button', { onclick: () => spotSend('group_logout', 'The group\'s speaker logged out') }, 'Log out') : null);
+    const ms = g.members || [];
+    memBtns.replaceChildren(...ms.map((m) => h('button', { class: m.in ? 'on' : '', title: m.in ? 'Leave it out' : 'Take it in',
+      onclick: () => spotSend(`group_${m.in ? 'out' : 'in'} ${m.node}`, m.in ? `${m.node} left out` : `${m.node} plays along`) },
+      `${m.in ? '✓ ' : ''}${m.self ? 'This Echo' : m.node}${m.joined ? ' (playing)' : ''}`)));
+    memVal.replaceChildren(`${ms.filter((m) => m.in).length} of ${ms.length}`);
+  };
+  const paint0 = spotCtl.paint; spotCtl.paint = () => { paint0(); paintGroup(); };
   const card = titled('Spotify', main ? settingRow(main) : null, extra);
   spotCtl.paint();
   return card;
