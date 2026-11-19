@@ -3019,7 +3019,12 @@ function infoRow(title, sub, help, ctl, extra, val) {
 let spotCtl = null;
 // what came of the last spoken (or tried) command: src/spotify/src/main.rs "result"
 const SPOT_FAIL = { nologin: 'not logged in: pick the Echo once in the Spotify app', notfound: 'Spotify found nothing for it',
-  error: 'Spotify did not answer (its web API may be limiting this speaker)', notrunning: 'the speaker was not running' };
+  error: 'Spotify did not answer (its web API may be limiting this speaker)', notrunning: 'the speaker was not running',
+  clock: 'the Echo\'s clock is not set yet (it comes from Home Assistant)' };
+// why no session comes up (src/spotify/src/main.rs "error"); the page's words
+const SPOT_ERR = { clock: 'The Echo\'s clock is not set: it comes from Home Assistant once the Echo is connected to it',
+  unreachable: 'Spotify cannot be reached from the Echo: does its network let it out to the internet?',
+  refused: 'Spotify refused the login: pick the Echo in the Spotify app again (Spotify Premium is needed)' };
 function spotResult(r) {
   if (!r) return '';
   const [how, ...rest] = r.split(' '), what = rest.join(' ');
@@ -3076,7 +3081,7 @@ function spotifyCard(list) {
     const sp = state.spotify || {}, on = settingValue('spotify');
     extra.classList.toggle('hidden', !on);
     const what = !sp.present ? 'Not in this build' : !sp.running ? (sp.error ? `Not running (${sp.error})` : 'Starting…') : sp.logged_in ? `Logged in as ${sp.user}` : 'Not logged in';
-    const sub = [sp.playing && sp.title ? `Playing ${sp.artist ? sp.artist + ' – ' : ''}${sp.title}` : null,
+    const sub = [sp.running && sp.error ? SPOT_ERR[sp.error] || sp.error : null, sp.playing && sp.title ? `Playing ${sp.artist ? sp.artist + ' – ' : ''}${sp.title}` : null,
       sp.running && !sp.logged_in ? `pick "${sp.name || sp.default_name}" in the Spotify app` : null, spotResult(sp.result)].filter(Boolean);
     acct.replaceChildren(what, h('span', { class: 'row-val-sub' }, sub.join(' · ')));
     acctBtns.replaceChildren(...[sp.logged_in ? h('button', { onclick: () => spotSend('logout', 'Logged out of Spotify') }, 'Log out') : null].filter(Boolean));

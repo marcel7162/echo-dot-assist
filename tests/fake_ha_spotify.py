@@ -48,6 +48,10 @@ async def main(e):
     check(await until(lambda: os.path.exists(MDNS), 3) and "_spotify-connect._tcp" in open(MDNS).read() and "<port>28933</port>" in open(MDNS).read()
           and "<name>Echo Dot</name>" in open(MDNS).read(), "  its mDNS record in avahi's folder")
     check(await until(lambda: sp()["logged_in"] and sp()["user"] == "tester", 3), "  logged in as the app's account (the page says so)")
+    app("error clock")                      # what the speaker says while the Echo's clock is 1970 (no Home Assistant yet)
+    check(await until(lambda: sp()["error"] == "clock", 3), "why no session comes up reaches the page (the clock not set)")
+    app("login tester")
+    check(await until(lambda: sp()["error"] == "", 3), "  and goes once a session is up")
 
     # spoken: Home Assistant's run is cancelled, the speaker gets the search
     ha = await home_assistant(e)

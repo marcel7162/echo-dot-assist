@@ -398,7 +398,9 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   plus btmanagerd's AIPC service uuid 0 via `libace_aipc.so` (`docs/re-a2dp-source.md`), Android's AudioPolicy by
   `media.audio_policy` setDeviceConnectionState (`docs/re-checkers.md`; players opened meanwhile wait for the move). While on the speaker the core has a volume of its own (`core_speaker`).
 - **Spotify** (`spotify.c`, `spotify.h`, `spotcmd.c`; `src/spotify/`, device.mk `SPOTIFY`: donut): `hassmic-spotify`
-  (Rust, librespot 0.8, no default features: rustls with webpki roots, no rodio, no mDNS responder) is run by
+  (Rust, librespot 0.8, no default features: rustls with webpki roots, no rodio, no mDNS responder; librespot-core is
+  `src/third_party/librespot-core/`, patched: hash cash on every core (5 s a challenge, one A35 core missed it), a
+  build.rs without git; opt-level 3; access points on 443 only; no tries before 2026 by the clock, `error clock`) is run by
   `spotify.c`'s supervisor while the setting `spotify` is on: double fork (Amazon's DHA module waits for all children),
   effective group = hassmic's real 3990 (lockdown.sh lets that out), fds past 3 closed; ends by itself on stdin's or
   the audio pipe's EOF.  Zeroconf (getInfo/addUser, `zeroconf.rs`) on TCP 28933, announced by a service file of ours in

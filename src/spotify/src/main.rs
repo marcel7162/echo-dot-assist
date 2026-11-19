@@ -158,6 +158,26 @@ impl Mixer for EchoMixer {
     }
 }
 
+/// The Echo's clock comes from Home Assistant only (clock.c): before it has, it says 1970, and every certificate of
+/// Spotify's is "not valid yet" to rustls, which ends each connection at once with nothing but "Connect" to show for
+/// it (2026-11-19, an Echo on a phone's hotspot without Home Assistant).  Before 2026 is no time of ours
+fn clock_ok() -> bool {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() >= 1_767_225_600).unwrap_or(false)
+}
+
+/// librespot's error and what caused it, all the way down: "Service unavailable { client error (Connect) }" alone
+/// hides whether DNS, the connection or TLS failed
+fn why(e: &librespot_core::Error) -> String {
+    let mut s = e.to_string();
+    let mut src = std::error::Error::source(&*e.error);
+    while let Some(c) = src {
+        s.push_str(": ");
+        s.push_str(&c.to_string());
+        src = c.source();
+    }
+    s
+}
+
 enum End {
     Quit,
     Logout,
@@ -170,7 +190,9 @@ async fn main() {
     let _ = log::set_logger(&Logger).map(|_| log::set_max_level(log::LevelFilter::Debug));
     let a = args();
     let audio = unsafe { File::from_raw_fd(a.audio_fd) };
-    let session_config = SessionConfig { device_id: a.device_id.clone(), ..SessionConfig::default() };
+    // ap_port 443: Spotify's access points on 443 only (librespot's apresolve filters by it).  The first choice is
+    // 4070, which networks that let only the web's ports out drop: the connection hung in SYN_SENT (2026-11-19)
+    let session_config = SessionConfig { device_id: a.device_id.clone(), ap_port: Some(443), ..SessionConfig::default() };
     let cache = match Cache::new(Some(&a.dir), None, None, None) {
         Ok(c) => c,
         Err(e) => {
@@ -207,6 +229,23 @@ async fn main() {
             }
             continue;
         };
+        if !clock_ok() {
+            log::warn!("the Echo's clock is not set (Home Assistant sets it once it is connected): Spotify cannot be reached before");
+            emit("error clock");
+            tokio::select! {
+                n = cred_rx.recv() => { creds = n.or(Some(c)); }
+                l = lines.next_line() => match l {
+                    Ok(Some(l)) if l != "quit" => {
+                        let k = l.split(' ').next().unwrap_or("");
+                        if matches!(k, "play" | "liked" | "search") { emit(&format!("result {k} fail clock")); }
+                        creds = Some(c);
+                    }
+                    _ => break,
+                },
+                _ = tokio::time::sleep(Duration::from_secs(10)) => { creds = Some(c); }
+            }
+            continue;
+        }
         let cache = Cache::new(Some(&a.dir), None, None, None).ok();
         match session(&a, session_config.clone(), cache, c.clone(), &audio, &mut volume, &mut lines, &mut cred_rx).await {
             End::Quit => break,
@@ -221,14 +260,23 @@ async fn main() {
             End::Lost(e) => {
                 emit("state stopped");
                 if matches!(e.kind, ErrorKind::Unauthenticated | ErrorKind::PermissionDenied) {
-                    log::warn!("login refused ({e}): the app has to log in again");
+                    log::warn!("login refused ({}): the app has to log in again", why(&e));
+                    emit("error refused");
                     let _ = std::fs::remove_file(a.dir.join("credentials.json"));
                     continue;
                 }
-                log::warn!("session ended ({e}); again in {backoff} s");
-                // a new login from the app meanwhile is taken at once
+                log::warn!("session ended ({}); again in {backoff} s", why(&e));
+                emit(&format!("error {}", if clock_ok() { "unreachable" } else { "clock" }));
+                // a new login from the app meanwhile is taken at once; hassmic's "quit" too (it kills what does not end)
                 tokio::select! {
                     c = cred_rx.recv() => { creds = c; backoff = 5; continue; }
+                    l = lines.next_line() => match l {
+                        Ok(Some(l)) if l != "quit" => {
+                            let k = l.split(' ').next().unwrap_or("");
+                            if matches!(k, "play" | "liked" | "search") { emit(&format!("result {k} fail error")); }
+                        }
+                        _ => break,
+                    },
                     _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}
                 }
                 backoff = (backoff * 2).min(300);

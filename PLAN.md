@@ -4416,3 +4416,17 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       (it limited third-party clients through 2025): "Spiel Spotify" and the liked songs do not need it; (5) the SELinux
       domain: the child stays in hassmic's (`allow hassmic * * *`), so nothing new expected.  Not on the other models:
       device.mk `SPOTIFY` names the Rust target where it is wanted (armv7 for the 32-bit Android ones too).
+- [~] **Spotify on the Echo, first tries, 2026-11-19 (donut on a Windows hotspot, no Home Assistant).**  Found in
+      the app (mDNS through avahi and getInfo work), the login handed over (zeroconf), then no session, for three
+      reasons in turn.  (1) An old trial copy in /data/local/hassmic/hassmic (main.sh prefers it) ran instead of the
+      update: moved away by hand.  (2) The clock: Home Assistant is its only source, so 1970 without it, and rustls
+      ended every TLS connection at once ("client error (Connect)", 60 ms); set by hand (`date -u @<epoch>`, the RTC
+      has no node).  The speaker now checks it (before 2026: no tries, `error clock`, the page says why) and logs the
+      error's whole chain.  (3) Spotify's hash cash (client token, login5): 5 s a challenge, and one core of the
+      MT8516's Cortex-A35 missed it for one in three, then all three in a row ("Unable to solve any of 3 hash cash
+      challenges"; a later try took 12 s for the client token).  librespot-core is now this repository's copy
+      (`src/third_party/librespot-core/`, `[patch.crates-io]`): the hash cash on every core (4 here), its build.rs
+      without git and clock; and opt-level 3 instead of "s" (SHA-1 in a loop 1.7x faster on the PC's plain Rust path;
+      4.5 MB instead of 3.4).  (4) The access point on 4070 hung in SYN_SENT on that network: `ap_port` 443.  Also: a
+      "quit" during the wait between tries was not read (hassmic killed it after 5 s), now it is.  Next: the same Echo
+      with these, then playback (CPU at 320 kbit/s, the volume both ways, the button).

@@ -228,6 +228,26 @@ mod tests {
         assert_eq!(decrypt(&ours.shared_secret(&phone.public_key()), &blob).as_deref(), Some(&b"a blob of the account"[..]));
     }
 
+    /// librespot-core's hash cash as patched here (src/third_party/librespot-core): on every core, still an answer
+    /// whose hash has the trailing zeros, in the suffix's form (target + counter, counter)
+    #[test]
+    fn hash_cash_on_every_core() {
+        use byteorder_free::read_i64;
+        let (ctx, prefix) = (b"a context from Spotify", b"prefix of it");
+        let mut suffix = [0u8; 16];
+        librespot_core::util::solve_hash_cash(ctx, prefix, 14, &mut suffix).expect("solved within 5 s");
+        let mut h = Sha1::new();
+        h.update(prefix);
+        h.update(suffix);
+        assert!(read_i64(&h.finalize()[12..20]).trailing_zeros() >= 14);
+        let target = read_i64(&Sha1::digest(ctx)[12..20]);
+        assert_eq!(read_i64(&suffix[..8]), target.wrapping_add(read_i64(&suffix[8..])));
+    }
+
+    mod byteorder_free {
+        pub fn read_i64(b: &[u8]) -> i64 { i64::from_be_bytes(b[..8].try_into().unwrap()) }
+    }
+
     #[test]
     fn refuses_a_changed_blob() {
         let ours = DhLocalKeys::random(&mut rand::rng());

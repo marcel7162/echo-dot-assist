@@ -355,7 +355,7 @@ static void event(char *l)
     if (!strncmp(l, "login ", 6)) {
         pthread_mutex_lock(&sl);
         logged_in = strcmp(l + 6, "-") != 0; snprintf(user, sizeof user, "%s", logged_in ? l + 6 : "");
-        if (!logged_in) playing = 0;
+        if (!logged_in) playing = 0; else last_error[0] = 0;        /* a session is up: what went wrong before is over */
         pthread_mutex_unlock(&sl);
         return;
     }
@@ -380,6 +380,10 @@ static void event(char *l)
         pthread_mutex_lock(&core_lock);
         if (core_volume() != v) core_set_volume(v);
         pthread_mutex_unlock(&core_lock);
+        return;
+    }
+    if (!strncmp(l, "error ", 6)) {                     /* why no session comes up: clock, unreachable, refused (the page says it) */
+        pthread_mutex_lock(&sl); snprintf(last_error, sizeof last_error, "%s", l + 6); pthread_mutex_unlock(&sl);
         return;
     }
     if (!strncmp(l, "result ", 7)) {
