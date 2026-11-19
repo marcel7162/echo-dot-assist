@@ -52,7 +52,6 @@ use librespot_playback::convert::Converter;
 use librespot_playback::decoder::AudioPacket;
 use librespot_playback::mixer::{Mixer, MixerConfig, NoOpVolume};
 use librespot_playback::player::{Player, PlayerEvent};
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 
 struct Args {
@@ -207,7 +206,21 @@ async fn main() {
         std::process::exit(1);
     }
     emit("ready");
-    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    // stdin on a thread of its own: its end means hassmic ended or restarted, and the speaker ends with it at once,
+    // whatever it is waiting for.  Read only between awaits before, a speaker stuck connecting (an access point on
+    // 4070 that a network drops) outlived its hassmic and kept the zeroconf port from the next one (2026-11-19)
+    let (line_tx, mut lines) = mpsc::unbounded_channel::<String>();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for l in std::io::stdin().lock().lines() {
+            match l {
+                Ok(l) => { if line_tx.send(l).is_err() { break; } }
+                Err(_) => break,
+            }
+        }
+        log::info!("hassmic is gone: ending");
+        std::process::exit(0);
+    });
     let mut creds = cache.credentials();
     let audio = Arc::new(std::sync::Mutex::new(Some(audio)));
     let mut volume = a.volume;
@@ -217,8 +230,8 @@ async fn main() {
             emit("login -");
             tokio::select! {
                 c = cred_rx.recv() => { creds = c; }
-                l = lines.next_line() => match l {
-                    Ok(Some(l)) => match l.split(' ').next().unwrap_or("") {
+                l = lines.recv() => match l {
+                    Some(l) => match l.split(' ').next().unwrap_or("") {
                         "quit" => break,
                         "volume" => volume = l[6..].trim().parse::<u16>().unwrap_or(volume).min(100),
                         c @ ("play" | "liked" | "search") => emit(&format!("result {c} fail nologin")),
@@ -234,8 +247,8 @@ async fn main() {
             emit("error clock");
             tokio::select! {
                 n = cred_rx.recv() => { creds = n.or(Some(c)); }
-                l = lines.next_line() => match l {
-                    Ok(Some(l)) if l != "quit" => {
+                l = lines.recv() => match l {
+                    Some(l) if l != "quit" => {
                         let k = l.split(' ').next().unwrap_or("");
                         if matches!(k, "play" | "liked" | "search") { emit(&format!("result {k} fail clock")); }
                         creds = Some(c);
@@ -270,8 +283,8 @@ async fn main() {
                 // a new login from the app meanwhile is taken at once; hassmic's "quit" too (it kills what does not end)
                 tokio::select! {
                     c = cred_rx.recv() => { creds = c; backoff = 5; continue; }
-                    l = lines.next_line() => match l {
-                        Ok(Some(l)) if l != "quit" => {
+                    l = lines.recv() => match l {
+                        Some(l) if l != "quit" => {
                             let k = l.split(' ').next().unwrap_or("");
                             if matches!(k, "play" | "liked" | "search") { emit(&format!("result {k} fail error")); }
                         }
@@ -294,7 +307,7 @@ async fn session(
     creds: Credentials,
     audio: &Arc<std::sync::Mutex<Option<File>>>,
     volume: &mut u16,
-    lines: &mut tokio::io::Lines<BufReader<tokio::io::Stdin>>,
+    lines: &mut mpsc::UnboundedReceiver<String>,
     cred_rx: &mut mpsc::UnboundedReceiver<Credentials>,
 ) -> End {
     let session = Session::new(config, cache);
@@ -349,8 +362,8 @@ async fn session(
                 Some(c) => { let _ = spirc.shutdown(); break End::Credentials(c); }
                 None => continue,
             },
-            l = lines.next_line() => {
-                let l = match l { Ok(Some(l)) => l, _ => { let _ = spirc.shutdown(); break End::Quit; } };
+            l = lines.recv() => {
+                let l = match l { Some(l) => l, _ => { let _ = spirc.shutdown(); break End::Quit; } };
                 let (cmd, rest) = l.split_once(' ').unwrap_or((l.as_str(), ""));
                 match cmd {
                     "quit" => { let _ = spirc.shutdown(); break End::Quit; }
