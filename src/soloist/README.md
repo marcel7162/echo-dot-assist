@@ -18,6 +18,11 @@ What the Echo lacks, and what stands in:
   library is preloaded) gives the first TCP listener on port 0 `HMPULSE_ZC_PORT`.  After the first login Soloist turns
   discovery off ("Discovery disabled") and is reached through Spotify's servers.
 - **/etc/resolv.conf and /etc/ssl/certs/ca-certificates.crt**: /etc is /system/etc on the Echo; written there.
+- **CP15 barriers**: the arm32 build runs on ARMv6 and sets memory barriers with `mcr p15`; the Echo Dot 3's arm64
+  kernel emulates them for 32-bit programs (`/proc/sys/abi/cp15_barrier` 1), a trap each, and Soloist spun for minutes
+  in system time at its first request.  `2` has the CPU execute them: logged in within 3 s (2026-11-19).
+- **The first login**: from the app it timed out (30 s) while the barriers were emulated; paired on a PC instead
+  (`soloist -p -D dir`), the data folder copied over, the session restored on the Echo.  To try again with `2`.
 
 By hand first (`tools/soloist-kit.sh` makes the kit, `soloist-test.sh` runs it on the Echo); then hassmic runs it as
 it runs hassmic-spotify (spotify.c).

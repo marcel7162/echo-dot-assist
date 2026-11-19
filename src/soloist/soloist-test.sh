@@ -38,6 +38,11 @@ if [ "$(cat /system/etc/resolv.conf 2>/dev/null)" != "nameserver $dns" ] || ! cm
     echo "DNS ($dns) and certificates for glibc in /system/etc"
 fi
 
+# Soloist's arm32 build runs on ARMv6 too and sets its memory barriers with CP15 (mcr p15, c7, c10, 5); the Echo's
+# arm64 kernel emulates those for 32-bit programs, a trap into the kernel each: it spun for minutes at its first
+# request (all system time, 2026-11-19).  2: the CPU executes them itself (ARMv8 has them in AArch32), until a reboot
+[ -w /proc/sys/abi/cp15_barrier ] && echo 2 > /proc/sys/abi/cp15_barrier
+pkill -f 'mixplay -t Music -r 44100 -c 2 -l 28940' 2>/dev/null
 chmod 755 $D $D/soloist $D/*.so* 2>/dev/null
 mkdir -p $D/data $D/cache; chown -R $U $D/data $D/cache
 

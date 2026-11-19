@@ -43,6 +43,7 @@ int main(void)
     pa_threaded_mainloop_lock(m);
     pa_threaded_mainloop_start(m);
     pa_context_connect(c, NULL, 0, NULL);
+    check(PA_CONTEXT_IS_GOOD(pa_context_get_state(c)), "right after connect: a good state (CONNECTING), as Soloist checks");
     while (pa_context_get_state(c) != PA_CONTEXT_READY) pa_threaded_mainloop_wait(m);
     check(1, "context READY");
     pa_sample_spec ss = { PA_SAMPLE_FLOAT32LE, 44100, 2 };
@@ -53,6 +54,7 @@ int main(void)
     pa_stream_set_started_callback(s, started_cb, NULL);
     pa_buffer_attr attr = { (uint32_t)-1, (uint32_t)pa_usec_to_bytes(500000, &ss), (uint32_t)-1, (uint32_t)-1, (uint32_t)-1 };
     pa_stream_connect_playback(s, NULL, &attr, PA_STREAM_ADJUST_LATENCY, NULL, NULL);
+    check(PA_STREAM_IS_GOOD(pa_stream_get_state(s)), "right after connect_playback: a good state (CREATING)");
     while (pa_stream_get_state(s) != PA_STREAM_READY) pa_threaded_mainloop_wait(m);
     check(1, "stream READY");
     check(pa_stream_writable_size(s) == pa_usec_to_bytes(500000, &ss), "writable: the buffer asked for (500 ms)");

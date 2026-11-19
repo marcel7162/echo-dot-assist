@@ -172,12 +172,15 @@ static void ctx_set(pa_context *c, pa_context_state_t s) { c->state = s; if (c->
 static void ctx_connect_task(void *arg)
 {
     pa_context *c = arg;
-    ctx_set(c, PA_CONTEXT_CONNECTING); ctx_set(c, PA_CONTEXT_AUTHORIZING); ctx_set(c, PA_CONTEXT_SETTING_NAME); ctx_set(c, PA_CONTEXT_READY);
+    ctx_set(c, PA_CONTEXT_AUTHORIZING); ctx_set(c, PA_CONTEXT_SETTING_NAME); ctx_set(c, PA_CONTEXT_READY);
 }
+/* CONNECTING at once, as libpulse: Soloist looks at the state right after the call and takes one that is not
+ * PA_CONTEXT_IS_GOOD (UNCONNECTED is not) for a failure: "Unable to initialize AudioDriver, using dummy" (2026-11-19) */
 API int pa_context_connect(pa_context *c, const char *server, pa_context_flags_t flags, const pa_spawn_api *api)
 {
     (void)server; (void)flags; (void)api;
     logf_("context connect");
+    ctx_set(c, PA_CONTEXT_CONNECTING);
     post(c->m, ctx_connect_task, c);
     return 0;
 }
@@ -398,12 +401,7 @@ static void *sender_thread(void *arg)
     return NULL;
 }
 
-static void st_ready_task(void *arg)
-{
-    pa_stream *s = arg;
-    st_set(s, PA_STREAM_CREATING);
-    st_set(s, PA_STREAM_READY);
-}
+static void st_ready_task(void *arg) { st_set(arg, PA_STREAM_READY); }
 API int pa_stream_connect_playback(pa_stream *s, const char *dev, const pa_buffer_attr *attr, pa_stream_flags_t flags, const pa_cvolume *volume, pa_stream *sync)
 {
     (void)dev; (void)sync;
@@ -412,6 +410,7 @@ API int pa_stream_connect_playback(pa_stream *s, const char *dev, const pa_buffe
     if (volume && pa_cvolume_valid(volume)) s->c->volume = *volume;
     if (!pthread_create(&s->sender, NULL, sender_thread, s)) s->sending = 1;
     logf_("playback connected, buffer %zu bytes%s", s->tlength, s->corked ? ", corked" : "");
+    st_set(s, PA_STREAM_CREATING);                     /* at once, as the context's CONNECTING */
     post(s->c->m, st_ready_task, s);
     return 0;
 }
