@@ -2,6 +2,41 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-11-19 — Spotify on the Echo Dot 3
+
+- **Spotify on all your Echos at once, in step.** Switch on "Spotify on every Echo" (Music & Bluetooth) on one Echo:
+  the Spotify app gets a second speaker, "Alle Echos", that plays on every Echo you tick on the page, in step like
+  a Music Assistant group, without Music Assistant. Pick it in the app for all of them, or an Echo itself for that
+  one alone. The app's volume slider sets all of them; the action button or "stop" on any of them pauses. The music
+  starts about half a second after the app shows it.
+
+- **The Echo sets its clock from the internet.** Until now only Home Assistant set it, so after a power cut an Echo
+  that had not reached Home Assistant yet had a date in 1970, and everything that uses HTTPS failed: Spotify, online
+  updates, replies from an HTTPS Home Assistant. It now asks public time servers (pool.ntp.org, Cloudflare's,
+  Google's) until its clock is set, and twice a day after; Home Assistant's time still wins once it is connected.
+  "Time from the internet" (System) switches it off.
+
+- **The Echo Dot 3 is a Spotify Connect speaker again, and plays Spotify by voice.** Switch on "Spotify Connect" on
+  the settings page (Music & Bluetooth), pick the Echo in the Spotify app once, and it plays like a speaker Alexa
+  ran: the app's volume slider and the Echo's buttons move together, the action button pauses, the assistant ducks
+  it, and whatever you start last wins over Music Assistant or a phone. "Spiel Spotify" plays on what you last
+  heard; "Spiel Queen auf Spotify", "Spiel die Playlist … auf Spotify" or "Play the album … on Spotify" search
+  Spotify; "Nächstes Lied" and "Pause" work while Spotify plays. Home Assistant never sees these sentences. A falling
+  two-tone says when it could not, and the page says why. The page's Spotify card shows who is logged in and what
+  plays, renames the speaker in the app, logs out, and lets you try a sentence by typing it. Spotify Premium is
+  needed; built on librespot. Untested on a real Echo so far: tell us how it goes.
+- **Spotify through Spotify's own speaker software (Soloist).** For some accounts Spotify refuses librespot the
+  keys to every track: it logs in and plays nothing. "Spotify client" on the Spotify card now picks Spotify's own
+  Soloist instead, the default. The Echo downloads it from Spotify by itself (Spotify does not let us ship it) and
+  needs a free developer key from developer.spotify.com, entered once on the card ("Set key…"). It plays, pauses,
+  skips and follows the volume as before, the ring shows the app's volume steps, and "Spiel Spotify" works.
+- **"Spiel Queen auf Spotify" with Soloist too.** Soloist cannot search, so the Echo asks Spotify's Web API with an
+  app of your own: create one at developer.spotify.com and give its Client ID and Client secret to "Search" on the
+  Spotify card. The search finds public music; your private playlists it does not see.
+- **Spotify on the Echo Input too** (its line out or a Bluetooth speaker; not yet tried on one).
+- **Spotify on the Echo Dot 2 too.** The same as on the Dot 3 (its software is the same generation). Two Echos with
+  Soloist are two speakers in the Spotify app, each under its own name.
+
 ## 2026-11-18 — The language you speak, from the right time zone
 
 - **A Portuguese "Alexa" in Brazil finds where the wake word ends by its sounds again.** Since more languages came to

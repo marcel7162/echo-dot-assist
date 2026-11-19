@@ -118,7 +118,7 @@ void play_earcon_while(const short *pcm, size_t samples, unsigned rate, int (*go
  * Echo Show 5's (~350 ppm), for Sendspin's sync; HASSMIC_FAKE_MUSIC_BURST_MS of it vanish from the queue at once as it
  * starts and stay hidden: AudioTrack's buffer behind audio_android.c's slots (the Show 5's: ~137 ms). */
 struct stream { FILE *f; unsigned bps; long long t0, written; double speed; long long burst_us; float g; };   /* g: the gain now (gliding) */
-static struct stream music, bt, voip;
+static struct stream music, bt, spot, voip;
 static long long raw_us(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC_RAW, &ts); return (long long)ts.tv_sec * 1000000 + ts.tv_nsec / 1000; }
 
 static int s_open(struct stream *s, const char *env, const char *def, unsigned rate, unsigned channels)
@@ -191,6 +191,10 @@ long long music_prime_us(void) { return music.burst_us ? 150000 : 0; }   /* as a
 long long music_queued_us(void) { return s_queued_us(&music); }
 int       music_write(const void *data, size_t len) { return s_write(&music, data, len); }
 void      music_close(void) { s_close(&music); }
+int       spot_open(unsigned rate, unsigned channels) { return s_open(&spot, "HASSMIC_SPOT", "/tmp/hassmic_spot.raw", rate, channels); }
+long long spot_queued_us(void) { return s_queued_us(&spot); }
+int       spot_write(const void *data, size_t len) { return s_write(&spot, data, len); }
+void      spot_close(void) { s_close(&spot); }
 int       bt_open(unsigned rate, unsigned channels) { return s_open(&bt, "HASSMIC_BT", "/tmp/hassmic_bt.raw", rate, channels); }
 long long bt_queued_us(void) { return s_queued_us(&bt); }
 int       bt_write(const void *data, size_t len) { return s_write(&bt, data, len); }

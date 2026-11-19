@@ -83,6 +83,12 @@ static unsigned cap_filled, cap_taken;
 static int cap_held;
 static long long cap_full_ms;           /* when the last free block was filled (cap_lock): from then on audio is lost */
 static long long cap_lost_ms, cap_lost_said;    /* cap_read: lost since the last line, when that was */
+/* The front end's ASR pipeline multiplies each mic by its factory calibration from idme; where that is gone (an Echo
+ * Input with a new eMMC, 2026-11-19: "checkMiccal: ERROR! micCals[1]=0! PLEASE CHECK IDME MIC VALUE!") it gives exact
+ * zeros, while the mics themselves were fine (tinycap: speech at -50 dBFS).  So 3 s of nothing but |x| <= 1 from it
+ * reopens the capture as UNPROCESSED (source 9: no ASP pipeline in the HAL, docs/re-cupcake.md), for the rest of the
+ * run: no beamformer or echo canceller, but a voice.  A real room never reads that quiet through the front end. */
+static int cap_raw, cap_zero_blocks;
 
 static void cap_cb(SLAndroidSimpleBufferQueueItf q, void *ctx)
 {
@@ -109,7 +115,7 @@ int cap_open(void)
         return -1;
     }
     SLAndroidConfigurationItf cfg;
-    SLuint32 preset = SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION;
+    SLuint32 preset = cap_raw ? SL_ANDROID_RECORDING_PRESET_UNPROCESSED : SL_ANDROID_RECORDING_PRESET_VOICE_RECOGNITION;
     if ((*rec_obj)->GetInterface(rec_obj, SL_IID_ANDROIDCONFIGURATION, &cfg) == SL_RESULT_SUCCESS)
         (*cfg)->SetConfiguration(cfg, SL_ANDROID_KEY_RECORDING_PRESET, &preset, sizeof preset);
     /* Realize is where AudioFlinger decides about the recording rights (see the top) */
@@ -128,7 +134,7 @@ int cap_open(void)
         cap_close();
         return -1;
     }
-    fprintf(stderr, "audio: OpenSL ES capture, VOICE_RECOGNITION, %u Hz mono\n", CAP_RATE);
+    fprintf(stderr, "audio: OpenSL ES capture, %s, %u Hz mono\n", cap_raw ? "UNPROCESSED (no front end)" : "VOICE_RECOGNITION", CAP_RATE);
     return 0;
 }
 
@@ -168,6 +174,17 @@ int cap_read(const void **data)
     }
     empty = 0;
     *data = cap_buf[cap_taken % CAP_NBUF]; cap_held = 1;
+    if (!cap_raw) {
+        const short *b = cap_buf[cap_taken % CAP_NBUF]; int quiet = 1;
+        for (int i = 0; i < CAP_BLOCK && quiet; i++) if (b[i] > 1 || b[i] < -1) quiet = 0;
+        cap_zero_blocks = quiet ? cap_zero_blocks + 1 : 0;
+        if (cap_zero_blocks >= 3 * CAP_RATE / CAP_BLOCK) {
+            pthread_mutex_unlock(&cap_lock);
+            fprintf(stderr, "audio: the front end gives only zeros (no mic calibration in idme?): the mics unprocessed from now on\n");
+            cap_raw = 1; cap_zero_blocks = 0; cap_close();
+            return 0;
+        }
+    }
     pthread_mutex_unlock(&cap_lock);
     return sizeof cap_buf[0];
 }
@@ -209,7 +226,8 @@ static struct pstream voice = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHRE
                       music = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &music_q16 },
                       earcon = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER },
                       voip = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &call_q16 },
-                      bt = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &music_q16 };
+                      bt = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &music_q16 },
+                      spot = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &music_q16 };
 
 /* --- volume: Android's own, the music stream's index (0..its maximum, 30 on the Show), set through IAudioService with
  * the firmware's service tool as the front end is reached (afe_parcel.c): setStreamVolume(stream, index, flags,
@@ -572,6 +590,10 @@ long long music_prime_us(void) { return 150000; }
 /* The Bluetooth speaker stream: what a phone plays to the Echo (a2dp.c), the mixer's Bluetooth stream on the Dots.
  * Here a player of its own beside music, on the music stream like everything of ours.  Until it was there (-1) the
  * phone's audio filled a2dp.c's buffer and was dropped: paired and streaming, nothing heard (2026-10-13). */
+int       spot_open(unsigned rate, unsigned channels) { return s_open(&spot, rate, channels, SL_ANDROID_STREAM_MEDIA); }
+int       spot_write(const void *data, size_t len) { return s_write(&spot, data, len); }
+long long spot_queued_us(void) { return s_queued_us(&spot); }
+void      spot_close(void) { s_close(&spot, 0); }
 int       bt_open(unsigned rate, unsigned channels) { return s_open(&bt, rate, channels, SL_ANDROID_STREAM_MEDIA); }
 int       bt_write(const void *data, size_t len) { return s_write(&bt, data, len); }
 long long bt_queued_us(void) { return s_queued_us(&bt); }

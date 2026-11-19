@@ -56,6 +56,8 @@
 #include "mass.h"
 #include "ws.h"
 #include "statefile.h"
+#include "ssgroup.h"
+#include "../third_party/monocypher.h"
 #define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_STDIO
 #define DR_FLAC_NO_OGG
@@ -451,6 +453,13 @@ static int psk_select(const char *id, const char *declared, const char *server_i
     if (!declared || !strcmp(declared, "sn")) { psk_id(sentinel_psk, cand); if (!strcmp(cand, id)) { memcpy(out, sentinel_psk, 32); return PSK_SENTINEL; } }
     if (!declared || !strcmp(declared, "pr")) { psk_id(pairing_psk, cand);  if (!strcmp(cand, id)) { memcpy(out, pairing_psk, 32); return PSK_PAIRING; } }
     if (declared && strcmp(declared, "lt")) return -1;
+    /* an Echo of our arbitration network serving its Spotify (ssgroup.c): a long-term key both derive, no pairing */
+    uint8_t g[32];
+    if (!ssgroup_psk(server_id, g)) {
+        psk_id(g, cand);
+        if (!strcmp(cand, id)) { memcpy(out, g, 32); crypto_wipe(g, 32); return PSK_LONGTERM; }
+        crypto_wipe(g, 32);
+    }
     pthread_mutex_lock(&rec_lock);
     for (int i = 0; i < n_records && cat == -1; i++) {
         psk_id(records[i].psk, cand);

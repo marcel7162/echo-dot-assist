@@ -4,6 +4,11 @@ TARGET  := armv7a-linux-androideabi24
 AUDIO   := src/hassmic/audio_mixer.c
 WAKE    := src/hassmic/wake_pryon.c
 LIBS    := libmixerAPI.so libpryon.so libopus.so libz.so
+# Spotify Connect (src/spotify/: Rust on librespot, spotify.c runs it): Rust's name for TARGET's platform
+SPOTIFY := armv7-linux-androideabi
+# Spotify Soloist's runtime (src/soloist/: glibc for 32-bit ARM, its libpulse, CA certificates): Spotify's own Connect
+# client, for accounts librespot is refused the tracks' keys for.  Soloist itself is downloaded by each Echo
+SOLOIST := 1
 
 # Wi-Fi motion: the driver's own RX_STAT is the last frame from anyone on the channel; a kernel module of our own reads
 # every frame from the access point (src/kmod/).  donut's kernel is 4.4.22 arm64 and carries no config of its own.

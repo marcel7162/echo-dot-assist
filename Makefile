@@ -72,7 +72,46 @@ BIN := $(OUT)/hassmic $(OUT)/runas $(OUT)/otatool $(if $(filter %screen.c,$(SCRE
        $(if $(filter libpryon.so,$(LIBS)),$(OUT)/pryon_test $(OUT)/aed_test $(OUT)/whisper_test)
 
 .DEFAULT_GOAL := all
-all: $(BIN)
+
+# Spotify Soloist's runtime where device.mk has SOLOIST (src/soloist/README.md): Soloist's arm32 build is a glibc
+# program that dlopens PulseAudio.  glibc 2.39 from Ubuntu's armhf cross packages (LGPL; Soloist asks for 2.38), the
+# libpulse.so.0 of src/soloist/hmpulse.c built with that toolchain against PulseAudio's headers, and Ubuntu's CA
+# bundle.  Flat beside hassmic (the bundle has no folders): glibc's names (libc.so.6, ld-linux-armhf.so.3) are not
+# bionic's.  Needs: gcc-arm-linux-gnueabihf libc6-armhf-cross libatomic1-armhf-cross libgcc-s1-armhf-cross libpulse-dev
+GLIBC_ARMHF := /usr/arm-linux-gnueabihf/lib
+GLIBC_LIBS  := ld-linux-armhf.so.3 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libresolv.so.2 libatomic.so.1 libgcc_s.so.1
+SOLOIST_RT  := $(OUT)/libpulse.so.0 $(addprefix $(OUT)/,$(GLIBC_LIBS)) $(OUT)/ca-certificates.crt
+$(OUT)/libpulse.so.0: src/soloist/hmpulse.c
+	@mkdir -p $(OUT) build/soloist/inc
+	@[ -f /usr/include/pulse/pulseaudio.h ] && command -v arm-linux-gnueabihf-gcc > /dev/null || { echo "Soloist's runtime needs: sudo apt install gcc-arm-linux-gnueabihf libc6-armhf-cross libatomic1-armhf-cross libgcc-s1-armhf-cross libpulse-dev" >&2; exit 1; }
+	cp -r /usr/include/pulse build/soloist/inc/
+	arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -fPIC -shared -fvisibility=hidden -Ibuild/soloist/inc -Wl,-soname,libpulse.so.0 \
+	    -Wl,--build-id=none -ffile-prefix-map=$(CURDIR)=/src src/soloist/hmpulse.c -o $@ -lpthread -ldl -lm
+$(addprefix $(OUT)/,$(GLIBC_LIBS)): $(OUT)/%: $(GLIBC_ARMHF)/%
+	@mkdir -p $(OUT)
+	cp -L $< $@
+$(OUT)/ca-certificates.crt: /etc/ssl/certs/ca-certificates.crt
+	@mkdir -p $(OUT)
+	cp -L $< $@
+all: $(BIN) $(if $(SPOTIFY),$(OUT)/hassmic-spotify) $(if $(SOLOIST),$(SOLOIST_RT))
+
+# Spotify Connect's speaker (src/spotify/, spotify.c) where device.mk names a Rust target (SPOTIFY): cargo with the
+# NDK's clang as linker for the same API level as hassmic, Rust as src/spotify/rust-toolchain.toml pins it.  The same
+# bytes on every machine and for every commit that leaves src/spotify/ alone (scripts/content-id.sh: no beta for a doc
+# change): paths remapped, librespot's build id and date fixed (SOURCE_DATE_EPOCH 0, vergen's idempotent output), no
+# build id note.  It needs no stock library, only the firmware's libc, libm and libdl, so STUBS changes nothing.
+NDKBIN     := $(NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin
+CARGO_HOME ?= $(HOME)/.cargo
+RUST_t     := $(subst -,_,$(SPOTIFY))
+RUST_T     := $(shell echo '$(RUST_t)' | tr '[:lower:]' '[:upper:]')
+SPOTIFY_SRC := src/spotify/Cargo.toml src/spotify/Cargo.lock src/spotify/rust-toolchain.toml $(wildcard src/spotify/src/*.rs)
+$(OUT)/hassmic-spotify: $(SPOTIFY_SRC)
+	@mkdir -p $(OUT)
+	cd src/spotify && env SOURCE_DATE_EPOCH=0 VERGEN_IDEMPOTENT=1 \
+	    CARGO_TARGET_$(RUST_T)_LINKER=$(CC) CC_$(RUST_t)=$(CC) AR_$(RUST_t)=$(NDKBIN)/llvm-ar \
+	    CARGO_TARGET_$(RUST_T)_RUSTFLAGS="--remap-path-prefix=$(CARGO_HOME)=/cargo --remap-path-prefix=$(CURDIR)=/src -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--build-id=none" \
+	    cargo build -q --locked --release --target $(SPOTIFY) --target-dir $(CURDIR)/build/cargo
+	cp build/cargo/$(SPOTIFY)/release/hassmic-spotify $@
 
 # Kernel module for Wi-Fi motion: the Wi-Fi driver's frame levels (device.mk: KMOD, e.g. hassmic_rcpi; src/kmod/).
 # Built against kernel.org's sources of the Echo's kernel version with its own config, by the compiler Amazon built that
@@ -229,7 +268,7 @@ WHISPER := $(if $(filter %wake_pryon.c,$(WAKE)),src/hassmic/whisper_pryon.c,src/
 
 RNNOISE := $(addprefix src/third_party/rnnoise/,denoise.c rnn.c rnn_data.c pitch.c kiss_fft.c celt_lpc.c)
 HASSMIC := src/hassmic/main.c src/hassmic/wyoming.c src/hassmic/proto_wyoming.c src/hassmic/proto_esphome.c src/hassmic/buttons.c $(RING) $(SCREEN) src/hassmic/ringdesign.c src/hassmic/ringlive.c src/hassmic/musiclight.c src/hassmic/ledq.c \
-           src/hassmic/sendspin.c src/hassmic/mass.c src/hassmic/json.c src/hassmic/arb.c src/hassmic/dropin.c src/hassmic/call.c src/hassmic/duck.c src/hassmic/ringstop.c src/hassmic/ble.c src/hassmic/ble_crypto.c src/hassmic/a2dp.c src/hassmic/a2dp_codecs.c src/hassmic/sbc.c src/hassmic/btout.c src/hassmic/ota.c src/hassmic/update.c src/hassmic/https.c src/hassmic/adbwifi.c src/hassmic/wifi.c src/hassmic/netaddr.c src/hassmic/improv.c src/hassmic/wifimotion.c src/hassmic/spkgain.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.c src/hassmic/hash.c src/hassmic/sounds.c src/hassmic/soundpack.c src/hassmic/micgain.c src/hassmic/micend.c src/hassmic/afemeta.c src/hassmic/wordtail.c src/hassmic/wakealign.c src/hassmic/micdenoise.c src/hassmic/earsup.c src/hassmic/settings.c src/hassmic/web.c src/hassmic/artifacts.c src/hassmic/dha.c src/hassmic/afe_parcel.c src/hassmic/davs.c src/hassmic/diag.c src/hassmic/clock.c src/hassmic/tz.c src/hassmic/apcountry.c src/hassmic/geo.c build/geo_data.c src/hassmic/statefile.c src/hassmic/volcurve.c src/hassmic/resample.c build/web_assets.c \
+           src/hassmic/sendspin.c src/hassmic/spotify.c src/hassmic/ssgroup.c src/hassmic/spotcmd.c src/hassmic/mass.c src/hassmic/json.c src/hassmic/arb.c src/hassmic/dropin.c src/hassmic/call.c src/hassmic/duck.c src/hassmic/ringstop.c src/hassmic/ble.c src/hassmic/ble_crypto.c src/hassmic/a2dp.c src/hassmic/a2dp_codecs.c src/hassmic/sbc.c src/hassmic/btout.c src/hassmic/ota.c src/hassmic/update.c src/hassmic/https.c src/hassmic/adbwifi.c src/hassmic/wifi.c src/hassmic/netaddr.c src/hassmic/improv.c src/hassmic/wifimotion.c src/hassmic/spkgain.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.c src/hassmic/hash.c src/hassmic/sounds.c src/hassmic/soundpack.c src/hassmic/micgain.c src/hassmic/micend.c src/hassmic/afemeta.c src/hassmic/wordtail.c src/hassmic/wakealign.c src/hassmic/micdenoise.c src/hassmic/earsup.c src/hassmic/settings.c src/hassmic/web.c src/hassmic/artifacts.c src/hassmic/dha.c src/hassmic/afe_parcel.c src/hassmic/davs.c src/hassmic/diag.c src/hassmic/clock.c src/hassmic/ntp.c src/hassmic/tz.c src/hassmic/apcountry.c src/hassmic/geo.c build/geo_data.c src/hassmic/statefile.c src/hassmic/volcurve.c src/hassmic/resample.c build/web_assets.c \
            src/hassmic/wake.c src/hassmic/wake_mww.c src/hassmic/mww_features.c src/hassmic/mww_model.c src/hassmic/mww_store.c \
            src/third_party/monocypher.c src/third_party/freeaptx.c $(RNNOISE)
 HASSMIC_H := $(wildcard src/hassmic/*.h src/include/*.h) build/.build-id
@@ -273,8 +312,25 @@ UNIT := src/hassmic/hash.c src/hassmic/ws.c src/hassmic/net.c src/hassmic/noise.
 # One target per test, so make -j unit runs them side by side (tests/run.py does: most of them wait or compile).
 UNIT_TESTS := hash ws noise ble_crypto micgain micend afemeta wordtail wakealign wifimotion spkgain tz apcountry geo statefile ledq micdenoise earsup dha_jwt a2dp_codecs \
 	sbc web_crypto web_tar web_soundpack web_matrix web_loudness ring_pack mww blueprint_dropin buttons buttons_privacy buttons_grab afe_parcel lux ring_band ringlive ringviz sounds wifictl ringbar volcurve band_map setup_wipe firmware kiosk backlight alexaoff \
-	screen ui touch json pb uninstall_boot sysinstall_aligners resample fork_release
+	screen ui touch json pb uninstall_boot sysinstall_aligners resample fork_release spotcmd spotify_rs hmpulse
 unit: $(addprefix unit-,$(UNIT_TESTS))
+# Spotify: the spoken commands (spotcmd.c), and the speaker's own tests (zeroconf's crypto, picking a search result) on the PC
+unit-spotcmd:
+	@mkdir -p build
+	cc -O2 -Wall -Wextra -Isrc/hassmic tests/unit/spotcmd_test.c src/hassmic/spotcmd.c -o build/spotcmd_test && build/spotcmd_test
+# Soloist's libpulse (src/soloist/hmpulse.c) as Soloist uses it, built for the PC against PulseAudio's headers
+unit-hmpulse:
+	@mkdir -p build/soloist/inc
+	cp -r /usr/include/pulse build/soloist/inc/
+	cc -O2 -Wall -Wextra -fPIC -shared -fvisibility=hidden -Ibuild/soloist/inc src/soloist/hmpulse.c -o build/soloist/libhmpulse-host.so -lpthread -ldl -lm
+	cc -O2 -Wall -Ibuild/soloist/inc tests/unit/hmpulse_test.c build/soloist/libhmpulse-host.so -Wl,-rpath,$(CURDIR)/build/soloist -lm -o build/hmpulse_test && build/hmpulse_test
+unit-spotify_rs:
+	cd src/spotify && cargo test -q --locked --target-dir $(CURDIR)/build/cargo-host
+# the speaker for the PC: tests/fake_ha_spotify.py starts it for what needs no Spotify account (zeroconf's getInfo, a
+# command without a login, ending with its stdin)
+build/hassmic-spotify-host: $(SPOTIFY_SRC)
+	cd src/spotify && cargo build -q --locked --release --target-dir $(CURDIR)/build/cargo-host
+	cp build/cargo-host/release/hassmic-spotify $@
 unit-hash:
 	@mkdir -p build
 	cc -O2 -Wall -Isrc/hassmic -Isrc/include tests/unit/hash_test.c $(UNIT) -lpthread -o build/hash_test && build/hash_test
@@ -286,6 +342,7 @@ unit-noise:
 	@mkdir -p build
 	cc -O2 -Wall -Isrc/hassmic -Isrc/include tests/unit/noise_test.c $(UNIT) -lpthread -o build/noise_test
 	.venv/bin/python tests/unit/noise_ref.py build/noise_test
+	build/noise_test kk-loop
 unit-ble_crypto:
 	@mkdir -p build
 	cc -O2 -Wall -Isrc/hassmic tests/unit/ble_crypto_test.c src/hassmic/ble_crypto.c -o build/ble_crypto_test && build/ble_crypto_test

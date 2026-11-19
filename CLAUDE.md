@@ -31,6 +31,9 @@ make host                # build/hassmic-host (PC: file audio + no wake word, SI
                          # build/donut/hassmic-qemu (ARM + real Pryon, run via tools/qrun.sh), build/otatool-host (the Echo's
                          # otatool for the PC, as tests' stand-in for the device side), build/hassmic-host-screen (the same
                          # with screen.c and the band, for tests/fake_screen.py, fake_ma_api.py). Needs libopus
+make DEVICE=donut build/donut/hassmic-spotify  # the Spotify Connect speaker (src/spotify/, Rust on librespot; in `all`
+                         # where device.mk has SPOTIFY): cargo, NDK clang as linker, Rust pinned by rust-toolchain.toml
+make build/hassmic-spotify-host  # the same for the PC (tests/fake_ha_spotify.py)
 make build/uishot        # the Echo Show's screen UI as PNG pictures, every view (FreeType; build/uishot <dir>)
 make unit                # C unit tests; ws/noise are checked against Python reference impls in .venv; the Drop In
                          # blueprint (tests/blueprint_dropin.py); one target each (unit-<name>): make -j unit runs them at once
@@ -82,6 +85,13 @@ aioesphomeapi, wyoming, aiosendspin, noiseprotocol, aiohttp):
                                              # strict: a deviation MA would only log fails; the output's clock
                                              # 500 ppm slow (HASSMIC_FAKE_MUSIC_PPM) and AudioTrack's burst at the
                                              # start (HASSMIC_FAKE_MUSIC_BURST_MS), followed without a phase step
+.venv/bin/python tests/fake_ha_spotify.py     # Spotify Connect with a stand-in speaker (tests/fake_spotify.py): started and
+                                             # announced, "Spiel Queen auf Spotify" taken before HA, its own stream,
+                                             # volumes both ways, button, error sound, rename, logout; then the real
+                                             # speaker (build/hassmic-spotify-host): getInfo, no login, end on EOF
+.venv/bin/python tests/fake_ssgroup.py       # Spotify on every Echo: a leader's stand-in Spotify served to its own and a
+                                             # member's Sendspin player (derived key), in step, volume, a member's button,
+                                             # an Echo of another network refused
 .venv/bin/python tests/fake_ha_stop_word.py   # "<wake word>, stop" between two Echos: the drop cancelled, stop_ends_listening
 .venv/bin/python tests/fake_ha_remote_bargein.py  # -w remote: a wake word run beside each reply, its wake word cuts the reply and
                                              # goes on as the request, "stop" after it, failed runs asked for again (3 at most)
@@ -390,6 +400,50 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   (`sbc.c`); the route is the backend's (`audio_a2dp_*` in `audio.h`): the Dots' mixer by LIPC `A2DPSourceConnect`
   plus btmanagerd's AIPC service uuid 0 via `libace_aipc.so` (`docs/re-a2dp-source.md`), Android's AudioPolicy by
   `media.audio_policy` setDeviceConnectionState (`docs/re-checkers.md`; players opened meanwhile wait for the move). While on the speaker the core has a volume of its own (`core_speaker`).
+- **Spotify** (`spotify.c`, `spotify.h`, `spotcmd.c`; `src/spotify/`, device.mk `SPOTIFY`: donut, biscuit, cupcake): `hassmic-spotify`
+  (Rust, librespot 0.8, no default features: rustls with webpki roots, no rodio, no mDNS responder; librespot-core is
+  `src/third_party/librespot-core/`, patched: hash cash on every core (5 s a challenge, one A35 core missed it), a
+  build.rs without git; opt-level 3; access points on 443 only; no tries before 2026 by the clock, `error clock`) is run by
+  `spotify.c`'s supervisor while the setting `spotify` is on: double fork (Amazon's DHA module waits for all children),
+  effective group = hassmic's real 3990 (lockdown.sh lets that out), fds past 3 closed; ends by itself on stdin's or
+  the audio pipe's EOF.  Zeroconf (getInfo/addUser, `zeroconf.rs`) on TCP 28933, announced by a service file of ours in
+  avahi's folder (`hassmic-spotify.service`, `HASSMIC_SPOTIFY_MDNS`); login kept in `state/spotify/credentials.json`,
+  the name shown in the app in `state/spotify/name` (empty: `core_name`), device id = SHA-1 of the node name.  PCM on
+  fd 3 -> `spot_*`, a stream of its own in every backend (one writer per stream), `core_music(MUSIC_SPOTIFY)` (newest
+  wins), `music_duck`, `musiclight_feed`.  Volume: the Echo's music volume both ways (`volume` events/commands;
+  `spotify_volume_changed` beside Sendspin's and a2dp's).  Button, multi press, "stop" and Drop In pause it like
+  Sendspin.  Voice: `core_transcript` -> `spotify_command` -> `spotcmd_parse` (pure; `make unit-spotcmd`), the run
+  cancelled as a "stop"; a refusal (`result <cmd> fail ...`) plays `core_error_sound`.  Search: Web API `/v1/search`
+  with login5's token (`search.rs` picks; `make unit-spotify_rs`).  Settings `spotify`, `spotify_voice`,
+  `spotify_bitrate` (restarts it), `spotify_normalise` (restarts it); page card `spotifyCard`, `GET/POST /api/spotify`
+  (`name`, `logout`, `say <words>`, `key <sealed>`).  Engine (setting `spotify_engine`, offered where Soloist's runtime
+  came with the build, `spotify_soloist_present`): Soloist (default; `soloist.rs`), Spotify's own headless Connect
+  client (glibc arm32, no redistribution: downloaded by hassmic-spotify into `state/spotify/soloist/`, again after
+  30 days) run as `ld-linux-armhf.so.3 --library-path <dir> --preload libpulse.so.0` with the glibc libs next to
+  hassmic (`GLIBC_LIBS`, the Makefile; device.mk `SOLOIST`); `src/soloist/hmpulse.c` is that libpulse: PCM to fd 3,
+  `HMPULSE_VOLUME=report` (the app's volume as "volume N" on an events fd, nothing attenuated), its zeroconf port fixed
+  to 28936 by a bind() interposer, `_exit` when hassmic's pipe end goes (`make unit-hmpulse`); control by `soloist ctl
+  -w 127.0.0.1:28937` (trace: state, track); the developer key `state/spotify/soloist.key` (0600, sealed from the page).
+  Root's `main.sh` `soloist_prep`: `cp15_barrier` 2 (else Soloist spins in the kernel's emulation), `/system/etc`'s
+  resolv.conf and CA bundle linked into `run/`.  Search with Soloist: the owner's Web API app (`webapi <sealed>` on the
+  page's POST, `state/spotify/webapi` "id\nsecret" 0600, `--webapi-file`): a client-credentials token, `/v1/search`
+  without a market (`search::url_app`), `search::pick`, `ctl activate` + `ctl play <uri>`; none: `fail nosearch`,
+  token refused: `fail webapi`.  Group (`ssgroup.c`, setting `spotify_group`): a second hassmic-spotify, the group's
+  speaker ("Alle Echos", `state/spotify/group_name`; `spotify_spawn_group`: folder `spotify/group`, zeroconf 28938,
+  Soloist control 28939, device id SHA-1 of node + " group", `--machine-id` its first 32 hex, which hmpulse.c's
+  open/fopen interposers serve as /etc/machine-id via HMPULSE_MACHINE_ID; librespot: avahi record `.group`), run by
+  ssgroup.c's own supervisor; its PCM, volume and controller commands are the group's; members left out by node in
+  `state/ssgroup.out` (page: `group_in|out <node>`, `group_name`, `group_logout` on POST /api/spotify, `group` in its
+  status).  This Echo is a Sendspin
+  1.0 server (KKpsk2 initiator, `noise_kk_initiator_init`/`_write_msg1`/`_read_msg2`; key `state/ssgroup.key`) that
+  dials every player of its arbitration network, its own on 127.0.0.1 included (`targets`: arb_members_json's IPs on
+  our Sendspin port; `HASSMIC_SSGROUP_PEERS` for tests), category "lt" with `ssgroup_psk` = HMAC(arb_derive("sendspin
+  group v1"), server id), which `sendspin.c` `psk_select` takes as paired; the group speaker's PCM resampled
+  44.1 -> 48 kHz (Catmull-Rom), 25 ms PCM chunks stamped 600 ms ahead in a 4 s ring,
+  stream/start per stretch, stream/end on 300 ms without PCM, server/command volume from the app's, client/command
+  (controller role) -> the group speaker's pause/resume/next/prev; connections while playing and 30 s after.  `tests/fake_ssgroup.py` (three Echos).
+  PC: `HASSMIC_SOLOIST_RUNTIME`; `HASSMIC_SPOTIFY` (the binary; tests: `tests/fake_spotify.py`), `HASSMIC_SPOT`
+  (its output file).  Builds byte for byte: paths remapped, SOURCE_DATE_EPOCH 0, VERGEN_IDEMPOTENT (content-id).
 - **Drop In** (`dropin.c`, `dropin.h`): calls between two Echos of the arbitration network. Signalling as signed
   `T_MSG` on arb's socket (`arb_tell`, `hooks->message`; invite/ringing/accept/refuse/bye), audio Opus 16 kHz 20 ms over
   unicast UDP 28932 (`-i`), per-call key from ephemeral X25519 + `arb_derive`. Playback on the mixer's `Voip` stream
@@ -517,7 +571,10 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
 - **Clock and log stamps** (`clock.c`): `proto_esphome.c` asks HA for the time (GetTimeRequest) on every link (on
   subscribe, then every 6 h on pings; the clock takes keyed links' answers only, any does for "Next timer"'s end,
   `ha_time`); `clock_from_ha` leaves `<epoch> <boottime s.cs>` in `state/clock`, root's
-  `main.sh` `clock_set` (netwatch) sets clock + RTC and `hassmic.clock.synced`. `clock_log_start()` (first in `main()`
+  `main.sh` `clock_set` (netwatch) sets clock + RTC and `hassmic.clock.synced`.  `ntp.c` (setting `ntp_time`, on):
+  SNTP to pool.ntp.org / Cloudflare / Google while unsynced (every 30 s) and every 12 h after, the same file with a
+  third word `ntp` (`clock_hand`); a random transmit time that the answer must echo; replies come in as established
+  flows (lockdown.sh); `HASSMIC_NTP` for tests (`tests/fake_ntp.py`; esphome_common points it at a dead port). `clock_log_start()` (first in `main()`
   after options) turns stderr/stdout into a pipe to a double-forked reader that stamps lines and drops known Amazon
   noise; it ignores hassmic's signals and ends at EOF. Never make it hassmic's direct child (Amazon's DHA module waits
   for all children). Host: `HASSMIC_CLOCK_SYNCED=0` plays an unset clock.
@@ -787,7 +844,7 @@ stock behaviour. `scripts/device/` holds on-device helpers (`lockdown.sh` firewa
 Firewall invariant: Amazon's daemons may only reach local addresses; hassmic itself may reach any address (it fetches
 TTS/media URLs from HA/MA). `otad`/`ace_otad` (firmware updates) must never get out. Inbound TCP and UDP are only admitted on
 16384–32767, so every listening port (26053 ESPHome, 16700 Wyoming, 28928 Sendspin, 28929 OTA, 28931 settings page, UDP 28930 arbitration)
-must stay in that range (UDP 28932 Drop In too). Exceptions: UDP 2330 (Kiosk Satellite's fixed port), which `lockdown.sh` admits only while
+must stay in that range (UDP 28932 Drop In, TCP 28933 Spotify Connect's zeroconf, 28936 Soloist's too). Exceptions: UDP 2330 (Kiosk Satellite's fixed port), which `lockdown.sh` admits only while
 `state/config` says `arbitration_mode=kiosk` (`kiosk_state`), and, where device.conf has `KIOSK_PACKAGE` (and the board `kiosk`, for the settings), the app's own TCP 2324 and 6053 from private addresses while it is installed, and with `kiosk_dlna` on its DLNA renderer (`kiosk_dlna` in `lockdown.sh`: the TCP port of the app's own setting `flutter.ks.dlna.port`, read through `runas` as its user, while its uid listens there per `/proc/net/tcp*`; UDP 1900 to 239.255.255.250 only while its uid alone holds 1900; issue #109); its uid may also reach the internet unless `kiosk_internet` is off (`KSUID`). Ping (ICMP echo request) is admitted from the private
 and link-local ranges of `LOCAL4` only. A stock rule hassmic comes to depend on (INPUT or OUTPUT) goes into `keep`, worded as `iptables -S`
 prints it.

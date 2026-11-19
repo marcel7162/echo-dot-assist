@@ -138,6 +138,50 @@ size_t noise_kk_write_msg2(struct noise_hs *s, const uint8_t psk[32], const void
     return 32 + plen + NOISE_TAG;
 }
 
+/* The initiator's side of KKpsk2 (ssgroup.c: an Echo serving its Spotify to the others as a Sendspin server) */
+void noise_kk_initiator_init(struct noise_hs *s, const void *prologue, size_t plen,
+                             const uint8_t s_priv[32], const uint8_t s_pub[32], const uint8_t responder_pub[32])
+{
+    memset(s, 0, sizeof *s);
+    sha256(PROTOCOL, sizeof PROTOCOL - 1, s->h);
+    memcpy(s->ck, s->h, 32);
+    mix_hash(s, prologue, plen);
+    memcpy(s->s_priv, s_priv, 32); memcpy(s->s_pub, s_pub, 32); memcpy(s->rs, responder_pub, 32);
+    mix_hash(s, s->s_pub, 32);          /* -> s */
+    mix_hash(s, s->rs, 32);             /* <- s */
+}
+
+size_t noise_kk_write_msg1(struct noise_hs *s, const void *payload, size_t plen, uint8_t *out)
+{
+    uint8_t dh[32];
+    if (!s->e_set) noise_keypair(s->e_priv, s->e_pub);
+    memcpy(out, s->e_pub, 32);
+    mix_hash(s, s->e_pub, 32); mix_key(s, s->e_pub, 32);                    /* e (psk mode) */
+    crypto_x25519(dh, s->e_priv, s->rs); mix_key(s, dh, 32);                /* es */
+    crypto_x25519(dh, s->s_priv, s->rs); mix_key(s, dh, 32);                /* ss */
+    crypto_wipe(dh, sizeof dh);
+    aead_encrypt(s->k, s->n++, s->h, 32, payload, plen, out + 32);
+    mix_hash(s, out + 32, plen + NOISE_TAG);
+    return 32 + plen + NOISE_TAG;
+}
+
+long noise_kk_read_msg2(struct noise_hs *s, const uint8_t psk[32], const uint8_t *msg, size_t len, uint8_t *payload,
+                        struct noise_cs *send, struct noise_cs *recv)
+{
+    uint8_t dh[32];
+    if (len < 32 + NOISE_TAG) return -1;
+    memcpy(s->re, msg, 32);
+    mix_hash(s, s->re, 32); mix_key(s, s->re, 32);                          /* e (psk mode) */
+    crypto_x25519(dh, s->e_priv, s->re); mix_key(s, dh, 32);                /* ee */
+    crypto_x25519(dh, s->s_priv, s->re); mix_key(s, dh, 32);                /* se: our static x their ephemeral */
+    crypto_wipe(dh, sizeof dh);
+    mix_key_and_hash(s, psk, 32);                                           /* psk2 */
+    if (aead_decrypt(s->k, s->n++, s->h, 32, msg + 32, len - 32, payload)) return -1;
+    mix_hash(s, msg + 32, len - 32);
+    split(s, recv, send);                                                   /* the initiator sends with k1 */
+    return (long)(len - 32 - NOISE_TAG);
+}
+
 void noise_nn_responder_init(struct noise_hs *s, const void *prologue, size_t plen)
 {
     memset(s, 0, sizeof *s);

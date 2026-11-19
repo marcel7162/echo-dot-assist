@@ -1,0 +1,45 @@
+# hassmic-spotify: a Spotify Connect speaker for hassmic (src/hassmic/spotify.c), on librespot.  hassmic starts it, reads
+# its PCM from a pipe and plays it on the Echo's music stream; protocol in src/main.rs.  Built by the Makefile with the
+# NDK's clang as linker (armv7-linux-androideabi, API 24) where device.mk has SPOTIFY, and for the PC (unit tests).
+[package]
+name = "hassmic-spotify"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+# no default features: no rodio/cpal (hassmic plays the audio), no OpenSSL (TLS by rustls with its own roots: the
+# Echo's CA store is from 2018), no mDNS responder (Amazon's avahi announces us: src/zeroconf.rs)
+librespot-core = { version = "=0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-connect = { version = "=0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-playback = { version = "=0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-metadata = { version = "=0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util"] }
+futures-util = "0.3"
+serde_json = "1"
+log = "0.4"
+http = "1"
+bytes = "1"
+rand = "0.9"
+aes = "0.8"
+ctr = "0.9"
+hmac = "0.12"
+sha1 = "0.10"
+base64 = "0.22"
+form_urlencoded = "1"
+flate2 = "1"
+libc = "0.2"
+
+# librespot-core with its hash cash on every core and fixed version strings: src/third_party/librespot-core/README.md
+[patch.crates-io]
+librespot-core = { path = "../third_party/librespot-core" }
+
+# speed over size (3.4 MB at "s"): the hash cash before each login is SHA-1 in a loop, 1.7x faster at 3 without
+# SHA instructions (measured on the PC's plain Rust path), and Vorbis decoding gains too
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

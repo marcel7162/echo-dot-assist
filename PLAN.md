@@ -4380,3 +4380,127 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       builder made then had no VERSION, libhmled.so, hassmic_rcpi4m.ko or latency (an update's files): on it the light
       ring has no Home Assistant light, no Wi-Fi motion, and the logs say "factory".  The builder's `--port` takes a
       bundle's files whole now, VERSION and update.pub included; this unit keeps the old copy until a reflash.
+
+## Spotify Connect — 2026-11-19
+
+- [~] **Spotify Connect and Spotify by voice on donut, 2026-11-19.**  Built and tested on the PC only: no Echo, no
+      Spotify account in the loop yet.  `src/spotify/` (`hassmic-spotify`): Rust on librespot 0.8.0 (`=` pinned, Cargo.lock;
+      vergen held at 9.0.6, 9.1 breaks librespot-core's build script), no default features: no rodio/cpal, rustls with
+      webpki roots (no OpenSSL; the Echo's CA store is from 2018), no mDNS responder: `zeroconf.rs` serves getInfo/addUser
+      itself on TCP 28933 (librespot-discovery's server is not public and its crate always starts libmdns, which would
+      sit beside Amazon's avahi on 5353); the record is a service file of hassmic's in avahi's folder while
+      the speaker runs.  PCM (s16 stereo 44.1 kHz) on fd 3, commands on stdin, events on stdout (`main.rs` lists them);
+      librespot attenuates nothing (`EchoMixer`): the Echo's music volume is the speaker's, both ways, equal values end
+      the echo.  armv7-linux-androideabi with the NDK's clang (API 24): 3.4 MB, NEEDED libc/libm/libdl only, byte for
+      byte the same from a clean build (paths remapped, SOURCE_DATE_EPOCH 0, vergen idempotent, no build id), and the
+      same for every commit that leaves src/spotify/ alone (content-id: no beta for doc changes).  hassmic's side
+      `spotify.c`: double fork (Amazon's DHA module waits for all children), effective group = the real 3990 so
+      lockdown.sh lets its sockets out (`net_socket` does the same per socket in hassmic), descriptors past 3 closed,
+      restarted 5 s doubling to 60 s while it ends within a minute, killed 5 s after a "quit" it ignored; its own stream
+      in every backend (`spot_open`: `music_*` has one writer, Sendspin), opened with the first PCM and closed 300 ms
+      after the last, which is what `core_music` hears (MUSIC_SPOTIFY: the newest source wins both ways), ducked as
+      Sendspin, fed to the ring's music effects.  Voice: `spotcmd.c` (German and English; only sentences with
+      "Spotify" start or search; next/previous/pause without it only while Spotify plays here), called from
+      `core_transcript` before the agent, the run cancelled as a "stop" is; refusals play `core_error_sound` (a falling
+      660/440 Hz two-tone).  Search: Web API `/v1/search` with login5's token, exact name in the order artist, playlist,
+      album, track, else Spotify's first track; artist/playlist/album load as a context, a track alone.  "Spiel
+      Spotify": `play` if paused here, else Connect's transfer to this device; nothing playing after 5 s: the liked
+      songs (`spotify:user:<name>:collection`).  Page: Spotify card on Music & Bluetooth, `GET/POST /api/spotify`
+      (state, `name`, `logout`, `say`).  Tests: `make unit-spotcmd` (40 sentences), `make unit-spotify_rs` (zeroconf's
+      crypto against a phone's sealing, picking results), `tests/fake_ha_spotify.py` (a stand-in speaker,
+      `tests/fake_spotify.py`, and the real one for getInfo, a refused addUser, "play" without a login, its end on
+      EOF).  Open, on the Echo: (1) a login from the Spotify app through avahi's record (the TXT records `VERSION`,
+      `CPath`, `Stack` as librespot's); (2) bionic's resolver for the Rust binary (getaddrinfo through netd, as hassmic)
+      and rustls against Spotify's servers; (3) CPU on the Dot 3's A53s at 320 kbit/s (Vorbis decode, rustls) beside
+      the front end and Pryon; (4) whether Spotify's Web API still answers librespot's login5 token for /v1/search
+      (it limited third-party clients through 2025): "Spiel Spotify" and the liked songs do not need it; (5) the SELinux
+      domain: the child stays in hassmic's (`allow hassmic * * *`), so nothing new expected.  Not on the other models:
+      device.mk `SPOTIFY` names the Rust target where it is wanted (armv7 for the 32-bit Android ones too).
+- [~] **Spotify on the Echo, first tries, 2026-11-19 (donut on a Windows hotspot, no Home Assistant).**  Found in
+      the app (mDNS through avahi and getInfo work), the login handed over (zeroconf), then no session, for three
+      reasons in turn.  (1) An old trial copy in /data/local/hassmic/hassmic (main.sh prefers it) ran instead of the
+      update: moved away by hand.  (2) The clock: Home Assistant is its only source, so 1970 without it, and rustls
+      ended every TLS connection at once ("client error (Connect)", 60 ms); set by hand (`date -u @<epoch>`, the RTC
+      has no node).  The speaker now checks it (before 2026: no tries, `error clock`, the page says why) and logs the
+      error's whole chain.  (3) Spotify's hash cash (client token, login5): 5 s a challenge, and one core of the
+      MT8516's Cortex-A35 missed it for one in three, then all three in a row ("Unable to solve any of 3 hash cash
+      challenges"; a later try took 12 s for the client token).  librespot-core is now this repository's copy
+      (`src/third_party/librespot-core/`, `[patch.crates-io]`): the hash cash on every core (4 here), its build.rs
+      without git and clock; and opt-level 3 instead of "s" (SHA-1 in a loop 1.7x faster on the PC's plain Rust path;
+      4.5 MB instead of 3.4).  (4) The access point on 4070 hung in SYN_SENT on that network: `ap_port` 443.  Also: a
+      "quit" during the wait between tries was not read (hassmic killed it after 5 s), now it is.  Next: the same Echo
+      with these, then playback (CPU at 320 kbit/s, the volume both ways, the button).
+      Then, 2026-11-19: logged in (an access point on 443, "Authenticated"), but every track's key refused ("error
+      audio key 0 1", librespot then reads it undecrypted and the MP3 probe gives up): librespot built for Android
+      speaks as Spotify's Android app.  The patched librespot-core says Linux on Android (`config.rs` `OS`): the
+      desktop client id, platform and version, as librespot on a Raspberry Pi.  A login stored with the Android
+      client id may need picking the Echo in the app once more.  Also: the speaker outlived a restarted hassmic while
+      stuck connecting (port 28933 taken): stdin now on a thread of its own, its end exits the process.
+- [~] **Spotify's audio keys refused to librespot; Soloist instead, 2026-11-19.**  With the desktop client id too,
+      every track's key came back refused ("error audio key 0 1") on the user's Duo account: an account-level block of
+      librespot (librespot issue #1649), not the Echo.  Spotify's own headless Connect client, Soloist v1.3.10 (arm32,
+      glibc >= 2.38, dynamic; dlopens libpulse.so.0, 50 `pa_*` functions, PipeWire skipped; a build expires after 90
+      days; no redistribution), runs on the Dot 3: found in the app through its own mDNS beside avahi, logged in,
+      played through `src/soloist/hmpulse.c` (libpulse emulated: threaded mainloop, one stream, s16le stereo to an fd,
+      paced by the clock; CONNECTING/CREATING must be set synchronously, else "Unable to initialize AudioDriver").
+      Measured on the Echo: (1) with `/proc/sys/abi/cp15_barrier` at 1 (the kernel's emulation, logged) Soloist hung at
+      its first request, all of it system time: 2 (hardware) fixes it, root's `soloist_prep`; (2) glibc's resolver
+      and OpenSSL want `/etc/resolv.conf` and `/etc/ssl/certs/ca-certificates.crt` (/etc = /system/etc): links into
+      `/data/local/hassmic/run/`, rewritten on address changes; (3) its zeroconf port is random: a bind() interposer
+      in the shim gives it 28936 (inbound range).  Integrated (stage 2a): setting `spotify_engine` (Soloist default
+      where the runtime came with the build), the developer key sealed from the page, hassmic-spotify downloads Soloist
+      (`soloist.rs`, librespot-core's HttpClient; refreshed after 30 days), starts it with `HMPULSE_VOLUME=report` (the
+      app's volume to the Echo's, shown on the ring; nothing attenuated twice), follows it by `soloist ctl trace`,
+      drives it by `ctl` (play/pause/next/prev/volume/activate; "Spiel Spotify" = activate + play, the liked songs =
+      `spotify:user:<u>:collection`).  Open: on the Echo, the download through HttpClient, whether Soloist attenuates
+      its PCM itself as well in report mode, one `ctl` process per command (cost), a login lost after 90 days' expiry.
+      Stage 2b: search with the owner's own developer app (client credentials, Web API `/v1/search`) -> `ctl play <uri>`.
+- [x] **Search with Soloist, 2026-11-19.**  Soloist plays on the Echo (the tester: playback, volume on the ring,
+      buttons, "Spiel Spotify" all work); it has no search, and the Web API wants a token of an app: the owner's own
+      (developer.spotify.com, Client ID + secret from the page, sealed; `state/spotify/webapi` 0600).  Client
+      credentials (no user: public catalogue only, no `market=from_token`), token kept until a minute before its end,
+      one retry with a new one; the pick is librespot's (`search.rs`), then `ctl activate`, `ctl play <uri>` (a track
+      alone or a context).  On the Echo, 2026-11-19: the tester's searches by voice play (Soloist, own app).
+      Open: Spotify's limits on development-mode apps over time; a login lost when a Soloist build expires (90 days).
+- [x] **Spotify on biscuit (Echo Dot 2), 2026-11-19.**  device.mk `SPOTIFY` + `SOLOIST` as donut's: the same Fire OS
+      build generation, mixer and libraries (biscuit's README).  Builds (bundle 81 files, the runtime in it); untried
+      on a Dot 2.  Differences to watch: its 32-bit kernel (no `cp15_barrier` to set: barriers native, soloist_prep
+      skips it), CPU beside the front end and Pryon at 320 kbit/s.
+- [x] **Two Echos with Soloist were one speaker, 2026-11-19.**  The Dot 2 showed up in the app under the Dot 3's name
+      and its connections failed.  Soloist takes its device id from `/etc/machine-id` (else `/var/lib/dbus/machine-id`,
+      strings of v1.3.10), which neither Echo has, so both fell back alike.  Root's `soloist_prep` now writes one per
+      Echo (MD5 of "hassmic soloist <Wi-Fi MAC>") into `run/machine-id`, linked as `/system/etc/machine-id`.  A login
+      Soloist kept under the old id does not decrypt any more: the Echo is picked in the app once more.  Soloist's
+      "ready, device_name=… device_id=…" line now reaches boot.log, to compare the two.
+- [x] **The clock from NTP, 2026-11-19.**  The tester's Echos (no Home Assistant on the hotspot) were at 1970 again
+      after a power cut: Soloist and rustls refuse every certificate then, and Spotify never showed.  `ntp.c`: SNTP v4
+      client, a random transmit time echoed as the answer's origin (else dropped), era 0 wrap handled, half the round
+      trip added; handed to root as Home Assistant's time is (`state/clock` "... ntp").  Servers pool.ntp.org,
+      time.cloudflare.com, time.google.com in turn; every 30 s while unset, 12 h after.  Setting `ntp_time` (on).
+      `tests/fake_ntp.py` (a stand-in server: the time taken, a spoofed answer not, off = no queries).
+- [x] **On both Echos, 2026-11-19.**  The tester's Dot 3 and Dot 2 with Soloist, after a power cut: the clock from
+      NTP, both listed in the Spotify app under their own names, both play.
+- [~] **Spotify on every Echo, 2026-11-19.**  Music Assistant's Spotify plays through librespot (refused on the tester's
+      Duo account) and its search was rate limited to uselessness, so the Echo running Soloist serves the group itself:
+      `ssgroup.c`, a Sendspin 1.0 server of hassmic's own for the members' existing players (no change to their
+      playout).  Trust: a long-term PSK derived from the network key and the server id, no pairing; another network's
+      Echo fails the handshake.  44.1 -> 48 kHz Catmull-Rom on the leader, 25 ms PCM chunks 600 ms ahead (Wi-Fi's
+      jitter on top of the players' 300 ms lead), stalls shift the timeline (a gap to the players).  On the PC
+      (`tests/fake_ssgroup.py`): both players 3 ms apart in what they wrote, volume, a member's button.  Open, on the
+      Echos: Wi-Fi bandwidth (PCM 1.5 Mbit/s a member: 2 members fine, Opus if more), the 600 ms lead on the tester's
+      hotspot, the leader's CPU with Soloist + server + its own player.
+- [~] **The group as a speaker of its own, 2026-11-19.**  Tried on the Echos: it plays, but switching the setting to
+      choose between one Echo and all was impractical, and every member always played.  Now the setting runs a second
+      speaker, "Alle Echos", in the app (a second hassmic-spotify / Soloist: own folder, ports 28938/28939, device id;
+      Soloist reads its own machine-id through hmpulse.c's open/fopen interposers, `make unit-hmpulse`), and only its
+      music goes to the group; the Echo's own speaker plays on it alone again.  Members are picked on the page
+      (`state/ssgroup.out`: those left out, so new members join).  `tests/fake_ssgroup.py`: the second speaker's
+      arguments, its avahi record, both players 1 ms apart, leave out and take back, the button.  Open on the Echos:
+      two Soloists' memory and CPU on the Dot 2 (the second one idles until picked).
+- [~] **Echo Input with a new eMMC: no mic calibration, 2026-11-19.**  The tester's cupcake (eMMC replaced: idme empty)
+      heard nothing: the HAL's ASR pipeline logged "checkMiccal: ERROR! micCals[1..3]=0! PLEASE CHECK IDME MIC VALUE!"
+      and gave exact zeros (capture dump: peak 1, -96 dBFS), while the mics were fine (tinycap on TDM_Capture, 4 ch:
+      speech at -50 dBFS, the room at -75).  `audio_android.c` now reopens the capture as UNPROCESSED (no ASP
+      pipeline) after 3 s of nothing but |x| <= 1, for the rest of the run: a voice without beamformer or echo
+      canceller.  Open on it: the wake word and STT through the unprocessed path; better, idme's mic values written
+      back (format and factory values unknown).

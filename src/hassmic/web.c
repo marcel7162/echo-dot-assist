@@ -59,6 +59,8 @@
 #include "ringlive.h"
 #include "netio.h"
 #include "settings.h"
+#include "spotify.h"
+#include "ssgroup.h"
 #include "sounds.h"
 #include "soundpack.h"
 #include "update.h"
@@ -1227,6 +1229,58 @@ static void handle(int fd)
             pthread_mutex_lock(&note_lk); jesc(nt, sizeof nt, note); fprintf(stderr, "web: note %s\n", note[0] ? "set" : "cleared"); pthread_mutex_unlock(&note_lk);
             snprintf(o, sizeof o, "{\"note\":\"%s\"}", nt); respond_sjson(fd, &r, 200, o);
         }
+    }
+    else if (!strcmp(r.method, "GET") && !strcmp(r.path, "/api/spotify")) {       /* the speaker's state (spotify.c) */
+        char o[2400];
+        if (!signed_ok(&r, 0)) { respond_json(fd, 401, "{\"error\":\"not logged in\"}"); free(r.body); return; }
+        spotify_status_json(o, sizeof o);
+        respond_sjson(fd, &r, 200, o);
+    }
+    else if (!strcmp(r.method, "POST") && !strcmp(r.path, "/api/spotify")) {
+        /* body: "name <shown name>" (empty: the Echo's), "logout", or "say <words>": a sentence as speech to text would
+         * write it, taken as a spoken one (the page's "Try a command"); the answer says whether it was Spotify's */
+        char t[300], o[2400];
+        if (!signed_ok(&r, 1)) { respond_json(fd, 401, "{\"error\":\"not logged in\"}"); free(r.body); return; }
+        snprintf(t, sizeof t, "%.*s", (int)(r.blen < sizeof t - 1 ? r.blen : sizeof t - 1), r.body ? r.body : "");
+        t[strcspn(t, "\r\n")] = 0;
+        if (!strncmp(t, "name", 4) && (!t[4] || t[4] == ' ')) {
+            if (spotify_set_name(t[4] ? t + 5 : "")) { respond_sjson(fd, &r, 400, "{\"error\":\"a name of up to 79 bytes, without < > &\"}"); free(r.body); return; }
+        } else if (!strncmp(t, "key ", 4)) {
+            /* Soloist's developer API key, sealed as the Wi-Fi password (plain HTTP; padded to 64 bytes); "-" removes it */
+            uint8_t sealed[130], k[131]; int kl = 0;
+            if (!strcmp(t + 4, "-")) kl = 0;
+            else if ((kl = unhex_any(sealed, sizeof sealed, t + 4)) <= 0 || unseal(&r, sealed, (size_t)kl, k)) {
+                respond_sjson(fd, &r, 400, "{\"error\":\"bad request\"}"); free(r.body); return;
+            }
+            k[kl] = 0;
+            int bad = spotify_set_key(kl ? (const char *)k : "");
+            crypto_wipe(k, sizeof k); crypto_wipe(sealed, sizeof sealed);
+            if (bad) { respond_sjson(fd, &r, 400, "{\"error\":\"not an API key\"}"); free(r.body); return; }
+        } else if (!strncmp(t, "webapi ", 7)) {
+            /* the owner's Web API app for searches: "<client id> <client secret>" sealed and padded as the key; "-" removes */
+            uint8_t sealed[130], k[131]; int kl = 0;
+            if (strcmp(t + 7, "-") && ((kl = unhex_any(sealed, sizeof sealed, t + 7)) <= 0 || unseal(&r, sealed, (size_t)kl, k))) {
+                respond_sjson(fd, &r, 400, "{\"error\":\"bad request\"}"); free(r.body); return;
+            }
+            k[kl] = 0;
+            char *sp = strchr((char *)k, ' ');
+            int bad = kl ? (!sp || (*sp = 0, spotify_set_webapi((char *)k, sp + 1))) : spotify_set_webapi("", "");
+            crypto_wipe(k, sizeof k); crypto_wipe(sealed, sizeof sealed);
+            if (bad) { respond_sjson(fd, &r, 400, "{\"error\":\"not a Client ID and Secret\"}"); free(r.body); return; }
+        } else if (!strcmp(t, "logout")) spotify_logout();
+        else if (!strncmp(t, "group_name", 10) && (!t[10] || t[10] == ' ')) {      /* the group's speaker (ssgroup.c) */
+            if (ssgroup_set_name(t[10] ? t + 11 : "")) { respond_sjson(fd, &r, 400, "{\"error\":\"a name of up to 79 bytes, without < > &\"}"); free(r.body); return; }
+        } else if (!strcmp(t, "group_logout")) ssgroup_logout();
+        else if (!strncmp(t, "group_in ", 9) || !strncmp(t, "group_out ", 10)) {
+            int in = t[6] == 'i';
+            if (ssgroup_member(t + (in ? 9 : 10), in)) { respond_sjson(fd, &r, 400, "{\"error\":\"bad request\"}"); free(r.body); return; }
+        }
+        else if (!strncmp(t, "say ", 4)) {
+            pthread_mutex_lock(&core_lock); int took = spotify_command(t + 4, ""); pthread_mutex_unlock(&core_lock);
+            if (!took) { respond_sjson(fd, &r, 200, "{\"said\":false}"); free(r.body); return; }
+        } else { respond_sjson(fd, &r, 400, "{\"error\":\"name, logout or say\"}"); free(r.body); return; }
+        spotify_status_json(o, sizeof o);
+        respond_sjson(fd, &r, 200, o);
     }
     else if (!strcmp(r.method, "POST") && !strcmp(r.path, "/api/dropin")) {       /* body: the node to drop in on, or "end" */
         char e[120], t[64], o[200], ej[160];

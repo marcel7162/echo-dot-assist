@@ -6,6 +6,9 @@ TARGET  := armv7a-linux-androideabi24
 AUDIO   := src/hassmic/audio_mixer.c
 WAKE    := src/hassmic/wake_pryon.c
 LIBS    := libmixerAPI.so libpryon.so libopus.so libz.so
+# Spotify Connect (src/spotify/, Rust) and Soloist's glibc runtime, as donut: the same userspace and mixer
+SPOTIFY := armv7-linux-androideabi
+SOLOIST := 1
 
 # Wi-Fi motion: the gen2 Wi-Fi driver reports no frame levels; a kernel module of our own reads them (src/kmod/).
 KMOD    := hassmic_rcpi

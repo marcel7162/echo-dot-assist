@@ -1,0 +1,47 @@
+/* Spotify Connect (spotify.c): hassmic-spotify (src/spotify/, librespot) run beside hassmic while the setting is on,
+ * its PCM played on a stream of its own, its volume the Echo's music volume, spoken commands ("Spiel Spotify",
+ * "Spiel Queen auf Spotify") taken before Home Assistant answers them. */
+#ifndef SPOTIFY_H
+#define SPOTIFY_H
+#include <stddef.h>
+
+#define SPOTIFY_PORT 28933
+#define SPOTIFY_GROUP_PORT 28938        /* the group's speaker (ssgroup.c): zeroconf, Soloist's or librespot's */
+#define SPOTIFY_GROUP_WS_PORT 28939     /* its Soloist's control, 127.0.0.1 only */              /* zeroconf (TCP): the firewall's inbound range, beside 28931 (page) and 28932 (Drop In) */
+
+int  spotify_present(void);             /* the daemon is there to run (next to hassmic, or $HASSMIC_SPOTIFY): any thread */
+void spotify_start(void);               /* main(): the supervisor thread, after settings_load */
+
+/* Settings (settings.c; -1 reads).  A change of bitrate or normalisation restarts the daemon */
+int  spotify_enable(int set);
+int  spotify_bitrate(int set);          /* index into spotify_bitrates */
+int  spotify_normalise(int set);
+int  spotify_voice(int set);            /* spoken commands */
+extern const char *const spotify_bitrates[3];   /* "96", "160", "320" (kbit/s) */
+int  spotify_engine(int set);           /* index into spotify_engines: Soloist (0) where its runtime is here, librespot */
+extern const char *const spotify_engines[2];
+int  spotify_soloist_present(void);     /* Soloist's runtime came with this build (libpulse.so.0 next to the speaker) */
+int  spotify_set_key(const char *key);
+int  spotify_spawn_group(const char *name, int *in_w, int *out_r, int *aud_r);   /* ssgroup.c's speaker; -1 failed */
+int  spotify_group_engine_soloist(void);
+int  spotify_enabled(void);
+void spotify_group_mdns(int on, const char *name);   /* librespot's: avahi's record for the group's speaker */
+int  spotify_set_webapi(const char *id, const char *secret);   /* searches with Soloist (state/spotify/webapi, 0600); "" "" removes */  /* Soloist's developer API key (state/spotify/soloist.key, 0600); "" removes it */
+
+/* Lock held (core_lock): the core's hooks */
+void spotify_volume_changed(int v);     /* the Echo's music volume moved (keys, Home Assistant): the app's slider follows */
+void spotify_pause(void);               /* another music source started (core_music): newest wins */
+int  spotify_stop(void);                /* "<wake word>, stop": 1 if it paused Spotify */
+int  spotify_button(void);              /* action button: pause, or play again what the button paused; 1 = used */
+int  spotify_skip(int dir);
+void spotify_resume(void);              /* a group member's controller said play (ssgroup.c) */             /* action button twice (+1) / three times (-1); 1 = sent */
+/* speech to text's words: 1 if they were a command for Spotify (sent, or refused with the error sound); the run is the
+ * caller's to cancel.  wake: the wake phrase ("Alexa"), so "Alexa, spiel Spotify" with the word sent too reads right */
+int  spotify_command(const char *text, const char *wake);
+
+/* The settings page (web.c): its state as JSON, and the speaker's own name (state/spotify/name; "" = the Echo's name,
+ * core_name) and logout.  Any thread */
+size_t spotify_status_json(char *out, size_t cap);
+int  spotify_set_name(const char *name);        /* 0, -1: too long or not text */
+void spotify_logout(void);
+#endif

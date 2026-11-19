@@ -683,6 +683,73 @@ one Echo. The log says
   ticked in the Echo's ESPHome options (Settings → Devices & services → ESPHome → the Echo → Configure). Without it
   you hear the chime only. "Bluetooth announcements" on the settings page turns both off and picks their language.
 
+### Spotify
+
+On the Echo Dot 3 and Echo Dot 2, the Echo is a Spotify Connect speaker, as with Alexa, and plays Spotify when you ask it to. Switch
+on "Spotify Connect" on the settings page (Music & Bluetooth). Then open Spotify on a phone or computer in the same
+network, tap the device icon and pick the Echo: that logs it in with the app's account. Spotify only lets **Premium**
+accounts play on speakers like this one. Your password never reaches the Echo. The app hands it a key for this
+speaker, which stays on the Echo, so voice commands work later without the app. Another account takes the speaker over
+the same way; "Log out" on the page forgets the key. The Echo shows up in Spotify under its own name; "Rename…" on the
+page gives it another one there.
+
+Spotify plays like the other sources: one at a time, the newest wins (Spotify pauses Music Assistant and a phone, and
+they pause Spotify), on the music volume, ducked under the assistant, paused by "<wake word>, stop" and by the action
+button (pressed again, it plays on; twice and three times skip). The volume slider in the Spotify app moves the
+Echo's volume, and the Echo's buttons and Home Assistant move the slider. "Spotify quality" picks 96, 160 or 320
+kbit/s; "Spotify volume normalisation" plays every track at about the same loudness.
+
+**By voice** ("Spotify by voice", on by default): sentences with the word Spotify go to Spotify instead of Home
+Assistant, in German and English:
+
+| You say | It plays |
+|---|---|
+| "Spiel Spotify", "Spotify weiter", "Play Spotify" | what you played last, here or on another device; with nothing to take over, your liked songs |
+| "Spiel meine Lieblingssongs auf Spotify", "Play my liked songs on Spotify" | your liked songs |
+| "Spiel Queen auf Spotify", "Spiel Bohemian Rhapsody auf Spotify" | the best match: an artist, playlist, album or song of exactly that name, in that order, else Spotify's best song for the words |
+| "Spiel die Playlist Chillout auf Spotify", "das Album …", "den Künstler …", "das Lied …", "Musik von …" | that kind only |
+| "Play the album Thriller on Spotify", "Play songs by Adele on Spotify" | the same in English |
+| "Nächstes Lied", "Vorheriges Lied", "Pause" (also "next song", "skip") | only while Spotify plays on this Echo; otherwise Home Assistant answers them as before |
+
+The music starting is the answer. A falling two-tone means it could not: not logged in, nothing found, or Spotify's
+search did not answer; the Spotify card on the page says which. "Try a command" on the card takes a sentence as if
+you had said it, to see what it does. The search goes through Spotify's web API with the speaker's own login, which
+Spotify may limit for speakers like this one; "Spiel Spotify" and the liked songs do not need it. The speaker is
+[librespot](https://github.com/librespot-org/librespot) (`hassmic-spotify`), started by hassmic while the setting is
+on. Not yet on other models.
+
+Spotify needs the right date (its servers' certificates are checked against it). The Echo takes it from public time
+servers by itself ("Time from the internet", System, on by default), else from Home Assistant once connected.
+
+**Spotify on every Echo.** Switch on "Spotify on every Echo" on one Echo (each would add a speaker of its own). The
+Spotify app then lists a second speaker beside that Echo, "Alle Echos" ("Rename…" under "Group speaker" changes
+it): pick it once to log it in, as with the Echo. What it plays goes to every Echo of the network (the Echos page,
+the network wake word arbitration uses) that is ticked under "Echos in the group" (all of them, until you tap one to
+leave it out; an Echo that joins later plays along), in step: this Echo sends the music to their Sendspin players,
+the same ones Music Assistant plays on, and they play it to within a few milliseconds of each other. Picking the Echo
+itself in the app still plays on it alone. Nothing to switch on on the others; they only need a current version.
+The app's volume slider sets every Echo of the group to that volume, and the action button, two or three presses,
+and "<wake word>, stop" on any of them pause or skip it. The music starts about half a second after the app shows it
+(time for the Wi-Fi). Echos outside the network never get it: the players only take it under a key derived from the
+network's own. With Soloist the Echo runs two copies of it while the setting is on.
+
+**Spotify client.** For some accounts (a Duo one among them) Spotify hands librespot no keys for its tracks: the Echo
+logs in and stays silent. "Spotify client" on the card picks between librespot and **Soloist**, Spotify's own
+software for speakers, the default. Soloist is Spotify's and may not be passed on, so the Echo downloads it from
+Spotify itself the first time (about 10 MB; again every 30 days, since a Soloist build stops working after 90) and
+runs it beside hassmic, which plays its sound and keeps its volume, buttons and voice commands as with librespot.
+Soloist needs a developer key: log in at developer.spotify.com, create an app with "Soloist" access, copy its key and
+give it to the card's "Set key…" (it travels encrypted and stays on the Echo). Then pick the Echo in the Spotify app
+as above; Soloist announces itself on the network. With Soloist, "Spiel Spotify", the liked songs, "Nächstes Lied"
+and "Pause" work as with librespot.
+
+Soloist cannot search, so for "Spiel Queen auf Spotify" the Echo asks Spotify's Web API itself, with an app of yours:
+in the dashboard at developer.spotify.com create an app (any name, a redirect URI such as `http://127.0.0.1/`, "Web
+API" ticked), open its settings and give its **Client ID** and **Client secret** to "Search" → "Set app…" on the
+card (sealed on the way, kept on the Echo). The Echo then searches as that app, not as your account: it finds public
+artists, albums, songs and playlists, not your private playlists, and Soloist plays the match on your account.
+Without the app, a search plays the falling two-tone and the card says what is missing.
+
 ### Even volume steps
 
 Each point of the volume is the same step, wherever it is set from (Home Assistant, Music Assistant, the buttons, the

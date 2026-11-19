@@ -21,6 +21,12 @@ long   noise_kk_read_msg1(struct noise_hs *s, const uint8_t *msg, size_t len, ui
 /* out needs 32 + plen + 16 bytes.  The PSK may be chosen after message 1 was read (its payload names it). */
 size_t noise_kk_write_msg2(struct noise_hs *s, const uint8_t psk[32], const void *payload, size_t plen, uint8_t *out,
                            struct noise_cs *send, struct noise_cs *recv);
+/* The initiator (ssgroup.c).  msg1's out needs 32 + plen + 16 bytes; msg2's payload room for len - 48.  -1: wrong PSK */
+void   noise_kk_initiator_init(struct noise_hs *s, const void *prologue, size_t plen,
+                               const uint8_t s_priv[32], const uint8_t s_pub[32], const uint8_t responder_pub[32]);
+size_t noise_kk_write_msg1(struct noise_hs *s, const void *payload, size_t plen, uint8_t *out);
+long   noise_kk_read_msg2(struct noise_hs *s, const uint8_t psk[32], const uint8_t *msg, size_t len, uint8_t *payload,
+                          struct noise_cs *send, struct noise_cs *recv);
 void   noise_nn_responder_init(struct noise_hs *s, const void *prologue, size_t plen);
 /* payload needs room for len - 48 bytes.  Returns the payload length, -1 if the message does not authenticate (wrong PSK). */
 long   noise_nn_read_msg1(struct noise_hs *s, const uint8_t psk[32], const uint8_t *msg, size_t len, uint8_t *payload);

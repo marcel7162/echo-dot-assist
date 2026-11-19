@@ -8,6 +8,8 @@
 #include "audio.h"
 #include "duck.h"
 #include "https.h"
+#include "ntp.h"
+#include "ssgroup.h"
 #include "ble.h"
 #include "btout.h"
 #include "micend.h"
@@ -20,6 +22,7 @@
 #include "sound.h"
 #include "sounds.h"
 #include "spkgain.h"
+#include "spotify.h"
 #include "update.h"
 #include "wifimotion.h"
 #include "statefile.h"
@@ -107,7 +110,7 @@ static int colour_actual(void)
 /* ---------------------------------------------------------------- the table */
 
 enum id { WAKE_ENGINE, SPEECH_LANG, WAKE_ADAPT, MIC_LEVEL, DENOISE, WAKE_SOUND, SOUND_TOUCH, SOUND_MICS_OFF, SOUND_MICS_ON, SOUND_VOLUME, SOUND_BT_ON, SOUND_BT_OFF, WAKE_SOUND_REMOVAL, MUTE, DND, TIMER_RING, TIMER_SOUND, TIMER_STOP_ANY, TIMER_STOP_OTHERS, STOP_ENDS, MULTI_PRESS, WAKE_IN_REQ, END_REQ, BT_ANNOUNCE, BT_LANG, LED_AUTO, LED_LEVEL, RING_ROT, BAND, MUSIC_PAGE, SCR_AUTO, SCR_LEVEL, SCR_ADJUST, SCR_COLOUR, SCREEN_TEXT, SCREEN_HOLD, SCREEN_TIMERS, SCR_SLEEP, SCR_CLOCK, ARB, ARB_MODE, ARB_AUTO, ARB_WINDOW, ARB_OFFSET, SOUND, WHISPER, WAKE_EVENTS, REQUEST_TEXT, RING_LIVE, WIFI_MOTION,
-          WIFI_SENS, LIGHT_SENSOR, BT_PROXY, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, CALL_MIC, UPDATES, HTTPS_VERIFY, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, KIOSK_DLNA, SS_UNPAIRED, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, DUCK, DUCK_OTHERS, VOLUME, VOL_SPLIT,
+          WIFI_SENS, LIGHT_SENSOR, BT_PROXY, BT_AUDIO, BT_SPEAKER, BT_OUT_DELAY, BT_OUT_AWAKE, BT_OUT_STAY, DROPIN, DROPIN_ANSWER, CALL_MIC, UPDATES, HTTPS_VERIFY, NTP_TIME, KIOSK_NET, KIOSK_MIC, KIOSK_CAM, KIOSK_DLNA, SS_UNPAIRED, SPOTIFY, SPOTIFY_ENGINE, SPOTIFY_VOICE, SPOTIFY_BITRATE, SPOTIFY_NORM, SPOTIFY_GROUP, EQ_BASS, EQ_MID, EQ_TREBLE, SPK_GAIN, DUCK, DUCK_OTHERS, VOLUME, VOL_SPLIT,
           ASSIST_LINK, ASSIST_LEVEL, ASSIST_OFFSET, SOUNDS_LINK, SOUNDS_LEVEL, SOUNDS_OFFSET, TIMER_LINK, TIMER_LEVEL, TIMER_OFFSET,
           CALL_LINK, CALL_LEVEL, CALL_OFFSET,
           VOL_EVEN, NSET };
@@ -221,6 +224,8 @@ static const struct setting table[NSET] = {
     [UPDATES]     = { "online_updates", "Online updates", "System", NULL, S_CHOICE, 0, 0, 1, 0 },
     /* https.c keeps it: media from a Home Assistant that serves HTTPS itself (issue #30) */
     [HTTPS_VERIFY] = { "https_verify", "Check HTTPS certificates", "System", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* ntp.c: the clock from the internet until Home Assistant sets it */
+    [NTP_TIME]    = { "ntp_time", "Time from the internet", "System", NULL, S_BOOL, 0, 1, 1, 0 },
     /* stored on/off; root's lockdown.sh lets Kiosk Satellite's uid out unless state/config says off (screen models) */
     [KIOSK_NET]   = { "kiosk_internet", "Kiosk Satellite internet access", "System", NULL, S_BOOL, 0, 1, 0, 0 },
     /* stored on/off: root's main.sh grants or revokes the app's RECORD_AUDIO (screen models; not exported:
@@ -231,6 +236,17 @@ static const struct setting table[NSET] = {
      * not exported: it opens ports, so each Echo's owner switches it there) */
     [KIOSK_DLNA]  = { "kiosk_dlna", "Kiosk Satellite DLNA renderer", "System", NULL, S_BOOL, 0, 1, 0, 0 },
     [SS_UNPAIRED] = { "sendspin_unpaired", "Music Assistant without pairing", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* spotify.c keeps them, state/config on disk: the Echo as a Spotify Connect speaker (hassmic-spotify, where the build
+     * has it: device.mk SPOTIFY), spoken commands for it, librespot's quality and loudness normalisation.  No entities:
+     * the login is the Spotify app's, the page shows it */
+    [SPOTIFY]     = { "spotify", "Spotify Connect", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* which client plays: Spotify's Soloist (its runtime in this build) or librespot (spotify.c) */
+    [SPOTIFY_ENGINE] = { "spotify_engine", "Spotify client", "Music", NULL, S_CHOICE, 0, 0, 1, 0 },
+    [SPOTIFY_VOICE] = { "spotify_voice", "Spotify by voice", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
+    [SPOTIFY_BITRATE] = { "spotify_bitrate", "Spotify quality", "Music", "kbit/s", S_CHOICE, 0, 0, 1, 0 },
+    [SPOTIFY_NORM] = { "spotify_normalise", "Spotify volume normalisation", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
+    /* ssgroup.c: this Echo's Spotify on every Echo of its arbitration network, in step (their Sendspin players) */
+    [SPOTIFY_GROUP] = { "spotify_group", "Spotify on every Echo", "Music", NULL, S_BOOL, 0, 1, 1, 0 },
     [EQ_BASS]     = { "equalizer_bass", "Equalizer bass", "Sound", "dB", S_INT, -6, 6, 1, 0 },
     [EQ_MID]      = { "equalizer_mid", "Equalizer mid", "Sound", "dB", S_INT, -6, 6, 1, 0 },
     [EQ_TREBLE]   = { "equalizer_treble", "Equalizer treble", "Sound", "dB", S_INT, -6, 6, 1, 0 },
@@ -279,6 +295,9 @@ static int present(enum id i)
     case DROPIN: case DROPIN_ANSWER: return dropin_running();
     case CALL_MIC: return callmic_present() && dropin_running();
     case SS_UNPAIRED: return core_sendspin_port != 0;
+    case SPOTIFY: case SPOTIFY_VOICE: case SPOTIFY_BITRATE: case SPOTIFY_NORM: return spotify_present();
+    case SPOTIFY_GROUP: return spotify_present() && core_sendspin_port;
+    case SPOTIFY_ENGINE: return spotify_present() && spotify_soloist_present();
     case SPK_GAIN: return spkgain_present();
     case MULTI_PRESS: return !board.action_combo;               /* the Shows: no action key, the volume pair stands in */
     case BAND: return ring_band_rows(-1) >= 0;
@@ -341,6 +360,8 @@ int settings_choices(const struct setting *s, const char *const **names)
     case CALL_MIC: *names = call_mics; return 2;
     case MUSIC_PAGE: *names = music_pages; return 3;
     case TIMER_SOUND: *names = timer_sounds; return 4;
+    case SPOTIFY_BITRATE: *names = spotify_bitrates; return 3;
+    case SPOTIFY_ENGINE: *names = spotify_engines; return 2;
     case END_REQ: *names = micend_names; return MICEND_MODES;
     default: *names = NULL; return 0;
     }
@@ -390,6 +411,7 @@ int settings_get(const struct setting *s)
     case WIFI_SENS: return wifimotion_sensitivity(-1);
     case UPDATES: return update_channel(-1);
     case HTTPS_VERIFY: return https_verify(-1);
+    case NTP_TIME: return ntp_enable(-1);
     case ARB: return arb_arbitrate(-1);
     case ARB_MODE: return arb_mode(-1);
     case ARB_AUTO: return arb_window_auto(-1);
@@ -400,6 +422,12 @@ int settings_get(const struct setting *s)
     case KIOSK_CAM: return kiosk_cam;
     case KIOSK_DLNA: return kiosk_dlna;
     case SS_UNPAIRED: return sendspin_unpaired(-1);
+    case SPOTIFY: return spotify_enable(-1);
+    case SPOTIFY_VOICE: return spotify_voice(-1);
+    case SPOTIFY_ENGINE: return spotify_engine(-1);
+    case SPOTIFY_GROUP: return ssgroup_enable(-1);
+    case SPOTIFY_BITRATE: return spotify_bitrate(-1);
+    case SPOTIFY_NORM: return spotify_normalise(-1);
     case EQ_BASS: case EQ_MID: case EQ_TREBLE: return core_eq((int)(s - table) - EQ_BASS);
     case BT_PROXY: return bt_proxy;
     case BT_AUDIO: return bt_audio;
@@ -472,6 +500,7 @@ static void put(enum id i, int v)
     case WIFI_SENS: wifimotion_sensitivity(v); break;
     case UPDATES: update_channel(v); break;
     case HTTPS_VERIFY: https_verify(v); break;
+    case NTP_TIME: ntp_enable(v); break;
     case ARB: arb_arbitrate(v); break;                          /* arb.c keeps it */
     case ARB_MODE: arb_mode(v); break;
     case ARB_AUTO: arb_window_auto(v); break;
@@ -482,6 +511,12 @@ static void put(enum id i, int v)
     case KIOSK_CAM: kiosk_cam = v; break;
     case KIOSK_DLNA: kiosk_dlna = v; break;
     case SS_UNPAIRED: sendspin_unpaired(v); break;              /* sendspin.c keeps it */
+    case SPOTIFY: spotify_enable(v); break;                     /* spotify.c: started or ended by its supervisor */
+    case SPOTIFY_VOICE: spotify_voice(v); break;
+    case SPOTIFY_ENGINE: spotify_engine(v); break;
+    case SPOTIFY_GROUP: ssgroup_enable(v); break;              /* the speaker starts again with the other */
+    case SPOTIFY_BITRATE: spotify_bitrate(v); break;            /* the daemon starts again with it */
+    case SPOTIFY_NORM: spotify_normalise(v); break;
     case EQ_BASS: case EQ_MID: case EQ_TREBLE: core_set_eq(i - EQ_BASS, v); break;     /* the mixer keeps it */
     case BT_PROXY: bt_proxy = v; break;                    /* the links close (feature): proto_esphome.c ends scan and links */
     case BT_AUDIO: bt_audio = v; if (!v) a2dp_pair(0); break;                        /* paired phones still connect */

@@ -12,5 +12,8 @@ adb push $(ls $OUT/mixcap $OUT/mixplay $OUT/pryon_test 2>/dev/null) $OUT/hassmic
 adb push wakealign/*.wa wakealign/*.was $D/ >/dev/null
 [ -n "$ANDROID" ] && adb push scripts/device/wifictl.dex ${SCREEN_BAND:+scripts/device/ringbar.dex} $D/ >/dev/null
 [ -f $OUT/libhmui.so ] && adb push $OUT/libhmui.so scripts/device/screen.dex $D/ >/dev/null
+[ -f $OUT/hassmic-spotify ] && adb push $OUT/hassmic-spotify $D/ >/dev/null      # Spotify Connect (spotify.c finds it next to hassmic)
+[ -f $OUT/libpulse.so.0 ] && adb push $OUT/libpulse.so.0 $OUT/ld-linux-armhf.so.3 $OUT/libc.so.6 $OUT/libm.so.6 $OUT/libpthread.so.0 \
+    $OUT/libdl.so.2 $OUT/librt.so.1 $OUT/libresolv.so.2 $OUT/libatomic.so.1 $OUT/libgcc_s.so.1 $OUT/ca-certificates.crt $D/ >/dev/null   # Soloist's runtime
 adb shell "chmod 755 $D/*"
 echo "pushed $DEVICE build to $D"

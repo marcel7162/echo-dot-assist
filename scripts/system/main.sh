@@ -188,23 +188,24 @@ take() {
     rm -rf $t; return 1
 }
 clock_set() {
-    local t= at= up now was d a first ds c
+    local t= at= src= up now was d a first ds c who
     c=$(take clock) || return 0
-    read -r t at < $c; rm -f $c
+    read -r t at src < $c; rm -f $c
+    who="Home Assistant"; [ "$src" = ntp ] && who=NTP
     read -r up _ < /proc/uptime
     case "$t" in ''|*[!0-9]*) t=x;; esac
     case "$at" in [0-9]*.[0-9][0-9]) case "${at%.*}${at#*.}" in *[!0-9]*) t=x;; esac;; *) t=x;; esac
     [ "$t" = x ] && { echo "clock: state/clock not understood, ignored"; return; }
     if [ ${#t} -ne 10 ] || [ $t -lt 1767225600 ]; then echo "clock: $t is not a time of ours, ignored"; return; fi
     ds=$(( ${up%.*} - ${at%.*} ))                   # whole seconds since hassmic had the time
-    if [ ${#at} -gt 12 ] || [ $ds -lt 0 ] || [ $ds -gt 600 ]; then echo "clock: Home Assistant's time is stale, ignored"; return; fi
+    if [ ${#at} -gt 12 ] || [ $ds -lt 0 ] || [ $ds -gt 600 ]; then echo "clock: $who's time is stale, ignored"; return; fi
     now=$(( t + (ds * 100 + 1${up#*.} - 1${at#*.} + 50) / 100 )) was=$(date +%s)     # 1xx: centiseconds without octal
     if ! date -u @$now > /dev/null 2>&1 || [ $(( $(date +%s) - now )) -gt 2 ]; then echo "clock: could not be set"; return; fi
     hwclock -w -u 2>/dev/null
     first=; [ "$(getprop hassmic.clock.synced)" = 1 ] || first=1
     setprop hassmic.clock.synced 1
     d=$((now - was)); a=behind; [ $d -lt 0 ] && { d=$((-d)); a=ahead; }
-    echo "clock: set from Home Assistant, $d s $a${first:+ (times in this log are UTC from here on, seconds since boot before)}"
+    echo "clock: set from $who, $d s $a${first:+ (times in this log are UTC from here on, seconds since boot before)}"
 }
 
 # Home Assistant's time zone (src/hassmic/clock.c, tz.c): state/timezone holds a zone name of this Echo's time zone
@@ -695,6 +696,49 @@ wifi_awake() {
 }
 
 # While the settings page switches networks (wifi.sh holds its lock), the link is that script's business: no wifisvc.
+# Spotify Soloist (src/soloist/README.md: Spotify's own Connect client, which hassmic runs where the build brings its
+# runtime, libpulse.so.0 next to it) is a glibc program: glibc's resolver reads /etc/resolv.conf, which Android has
+# none of (bionic asks netd), and Soloist's curl /etc/ssl/certs/ca-certificates.crt.  /etc is /system/etc: two links
+# there, made once on the system partition, into root's /data/local/hassmic/run/, which this keeps up to date: the DNS
+# server DHCP gave, at every satellite start and new address; the certificates of the running build.  And the CPU
+# executes the CP15 barriers of Soloist's ARMv6-compatible build itself: the kernel's emulation (1, the default for
+# 32-bit programs on an arm64 kernel) traps each, and Soloist spun for minutes in it (2026-11-19, Echo Dot 3).
+SOLRUN=/data/local/hassmic/run
+soloist_prep() {
+    [ -f $D/libpulse.so.0 ] || return 0
+    [ -w /proc/sys/abi/cp15_barrier ] && echo 2 > /proc/sys/abi/cp15_barrier
+    mkdir -p $SOLRUN; chmod 755 $SOLRUN
+    local dns; dns=$(getprop net.dns1); [ -n "$dns" ] || dns=$(getprop dhcp.$WLAN.dns1)
+    if [ -n "$dns" ] && [ "$(cat $SOLRUN/resolv.conf 2>/dev/null)" != "nameserver $dns" ]; then
+        echo "nameserver $dns" > $SOLRUN/resolv.conf.new && chmod 644 $SOLRUN/resolv.conf.new && mv $SOLRUN/resolv.conf.new $SOLRUN/resolv.conf
+        echo "soloist: DNS $dns for glibc"
+    fi
+    cmp -s $D/ca-certificates.crt $SOLRUN/ca-certificates.crt ||
+        { cp $D/ca-certificates.crt $SOLRUN/ca.new && chmod 644 $SOLRUN/ca.new && mv $SOLRUN/ca.new $SOLRUN/ca-certificates.crt; }
+    # Soloist's Spotify device id comes from /etc/machine-id (else /var/lib/dbus/machine-id), which no Echo has: without
+    # it two Echos were one speaker to the app (the Dot 2 listed under the Dot 3's name, its connections failing).
+    # One per Echo from its Wi-Fi MAC, the same across updates and resets
+    local mac mid; mac=$(cat /sys/class/net/$WLAN/address 2>/dev/null)
+    if [ -n "$mac" ]; then
+        mid=$(echo "hassmic soloist $mac" | md5sum 2>/dev/null); mid=${mid%% *}
+        # no md5sum (toybox without it): the MAC's own digits, padded to machine-id's 32
+        case "$mid" in ????????????????????????????????) ;; *) mid=$(echo "$mac" | tr -d ':'); mid="${mid}00000000000000000000"; mid=${mid%????????}; mid="68617373${mid}" ;; esac
+        [ "$(cat $SOLRUN/machine-id 2>/dev/null)" = "$mid" ] ||
+            { echo "$mid" > $SOLRUN/machine-id.new && chmod 644 $SOLRUN/machine-id.new && mv $SOLRUN/machine-id.new $SOLRUN/machine-id; echo "soloist: machine id from the Wi-Fi MAC"; }
+    fi
+    [ "$(readlink /system/etc/resolv.conf)" = $SOLRUN/resolv.conf ] && [ "$(readlink /system/etc/ssl/certs/ca-certificates.crt)" = $SOLRUN/ca-certificates.crt ] &&
+        [ "$(readlink /system/etc/machine-id)" = $SOLRUN/machine-id ] && return 0
+    $D/otatool remount rw /system/etc || { echo "soloist: cannot remount /system for /etc's links"; return 0; }
+    mkdir -p /system/etc/ssl/certs && chmod 755 /system/etc/ssl /system/etc/ssl/certs
+    rm -f /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt /system/etc/machine-id
+    ln -s $SOLRUN/resolv.conf /system/etc/resolv.conf; ln -s $SOLRUN/ca-certificates.crt /system/etc/ssl/certs/ca-certificates.crt
+    ln -s $SOLRUN/machine-id /system/etc/machine-id
+    chcon -h u:object_r:system_file:s0 /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt /system/etc/machine-id 2>/dev/null
+    chcon u:object_r:system_file:s0 /system/etc/ssl /system/etc/ssl/certs 2>/dev/null
+    sync; $D/otatool remount ro /system/etc
+    echo "soloist: /etc/resolv.conf, /etc/ssl/certs/ca-certificates.crt and /etc/machine-id link to $SOLRUN"
+}
+
 # Whenever the address changes, wifi.sh writes down which network the Echo is on, for the page: wpa_supplicant can also
 # move to another saved network by itself when the one it is on goes away.
 netwatch() {
@@ -711,7 +755,7 @@ netwatch() {
         fi
         if a=$(ifconfig $WLAN 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p'); [ -n "$a" ]; then
             miss=0
-            [ "$a" = "$addr" ] || { addr=$a; [ -f $D/wifi.sh ] && sh $D/wifi.sh status; }
+            [ "$a" = "$addr" ] || { addr=$a; [ -f $D/wifi.sh ] && sh $D/wifi.sh status; soloist_prep; }
             kmod
             wifi_awake
             [ -n "$WIFI_SERVICE" ] && [ "$(getprop init.svc.$WIFI_SERVICE)" = running ] && [ ! -d $WIFI/lock ] && { sleep 5; stop $WIFI_SERVICE; echo "netwatch: link up, $WIFI_SERVICE stopped"; }
@@ -825,7 +869,7 @@ ota_watch() {
                 [ -f $D/wifi.sh ] && sh $D/wifi.sh forget 2>&1 | stamped
                 st=/data/local/hassmic/state
                 for f in $st/* $st/.[!.]*; do [ -e "$f" ] || [ -L "$f" ] && rm -rf "$f"; done
-                rm -f /data/misc/avahi/services/hassmic.service
+                rm -f /data/misc/avahi/services/hassmic.service /data/misc/avahi/services/hassmic-spotify.service   # Spotify's login went with state/
                 start hassmic
                 say "== factory reset done, the satellite starts again"
                 continue
@@ -1067,6 +1111,7 @@ satellite)
         led_frame
         ledc_ours && [ -z "$(pidof ledcontroller-hm)" ] && { echo "light ring: ledcontroller with libhmled.so"; ledc_start; }
         sh $D/alexa-off.sh; quiet
+        soloist_prep
         # Android models: with the screen off Android lets the SoC suspend once no wake lock is held (autosleep), and the
         # satellite must keep listening: a kernel wake lock of root's, for as long as the satellite runs
         [ -n "$WAKE_LOCK" ] && echo "$WAKE_LOCK" > /sys/power/wake_lock

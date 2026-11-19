@@ -215,7 +215,8 @@ enum { TIMER_SOUND_TIMER, TIMER_SOUND_ALARM, TIMER_SOUND_BEEP, TIMER_SOUND_CUSTO
 int    core_timer_sound(int set);
 void   core_timer_sound_default(void);
 void   core_timer_sound_preview(void);                      /* not the lock: one ring of it, 10 s at most (the page's "Play") */
-enum { MUSIC_SENDSPIN = 1, MUSIC_BLUETOOTH = 2 };
+enum { MUSIC_SENDSPIN = 1, MUSIC_BLUETOOTH = 2, MUSIC_SPOTIFY = 4 };
+void   core_error_sound(void);                              /* a falling two-tone: a spoken command refused (spotify.c); any thread, lock or not */
 void   core_music(int source, int on);                      /* a music stream runs: the wake word threshold follows */
 void   core_bt_device(const char *name, int on);            /* a Bluetooth speaker source connected / went (not the lock) */
 void   core_bt_pairing(int on);                             /* the Bluetooth speaker's pairing window opened / closed (not the lock) */
