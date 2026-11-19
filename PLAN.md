@@ -4455,9 +4455,10 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       `spotify:user:<u>:collection`).  Open: on the Echo, the download through HttpClient, whether Soloist attenuates
       its PCM itself as well in report mode, one `ctl` process per command (cost), a login lost after 90 days' expiry.
       Stage 2b: search with the owner's own developer app (client credentials, Web API `/v1/search`) -> `ctl play <uri>`.
-- [~] **Search with Soloist, 2026-11-19.**  Soloist plays on the Echo (the tester: playback, volume on the ring,
+- [x] **Search with Soloist, 2026-11-19.**  Soloist plays on the Echo (the tester: playback, volume on the ring,
       buttons, "Spiel Spotify" all work); it has no search, and the Web API wants a token of an app: the owner's own
       (developer.spotify.com, Client ID + secret from the page, sealed; `state/spotify/webapi` 0600).  Client
       credentials (no user: public catalogue only, no `market=from_token`), token kept until a minute before its end,
       one retry with a new one; the pick is librespot's (`search.rs`), then `ctl activate`, `ctl play <uri>` (a track
-      alone or a context).  Open: the first real search on the Echo; Spotify's 2026 limits on development-mode apps.
+      alone or a context).  On the Echo, 2026-11-19: the tester's searches by voice play (Soloist, own app).
+      Open: Spotify's limits on development-mode apps over time; a login lost when a Soloist build expires (90 days).
