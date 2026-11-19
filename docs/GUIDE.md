@@ -683,6 +683,41 @@ one Echo. The log says
   ticked in the Echo's ESPHome options (Settings → Devices & services → ESPHome → the Echo → Configure). Without it
   you hear the chime only. "Bluetooth announcements" on the settings page turns both off and picks their language.
 
+### Spotify
+
+On the Echo Dot 3, the Echo is a Spotify Connect speaker, as with Alexa, and plays Spotify when you ask it to. Switch
+on "Spotify Connect" on the settings page (Music & Bluetooth). Then open Spotify on a phone or computer in the same
+network, tap the device icon and pick the Echo: that logs it in with the app's account. Spotify only lets **Premium**
+accounts play on speakers like this one. Your password never reaches the Echo. The app hands it a key for this
+speaker, which stays on the Echo, so voice commands work later without the app. Another account takes the speaker over
+the same way; "Log out" on the page forgets the key. The Echo shows up in Spotify under its own name; "Rename…" on the
+page gives it another one there.
+
+Spotify plays like the other sources: one at a time, the newest wins (Spotify pauses Music Assistant and a phone, and
+they pause Spotify), on the music volume, ducked under the assistant, paused by "<wake word>, stop" and by the action
+button (pressed again, it plays on; twice and three times skip). The volume slider in the Spotify app moves the
+Echo's volume, and the Echo's buttons and Home Assistant move the slider. "Spotify quality" picks 96, 160 or 320
+kbit/s; "Spotify volume normalisation" plays every track at about the same loudness.
+
+**By voice** ("Spotify by voice", on by default): sentences with the word Spotify go to Spotify instead of Home
+Assistant, in German and English:
+
+| You say | It plays |
+|---|---|
+| "Spiel Spotify", "Spotify weiter", "Play Spotify" | what you played last, here or on another device; with nothing to take over, your liked songs |
+| "Spiel meine Lieblingssongs auf Spotify", "Play my liked songs on Spotify" | your liked songs |
+| "Spiel Queen auf Spotify", "Spiel Bohemian Rhapsody auf Spotify" | the best match: an artist, playlist, album or song of exactly that name, in that order, else Spotify's best song for the words |
+| "Spiel die Playlist Chillout auf Spotify", "das Album …", "den Künstler …", "das Lied …", "Musik von …" | that kind only |
+| "Play the album Thriller on Spotify", "Play songs by Adele on Spotify" | the same in English |
+| "Nächstes Lied", "Vorheriges Lied", "Pause" (also "next song", "skip") | only while Spotify plays on this Echo; otherwise Home Assistant answers them as before |
+
+The music starting is the answer. A falling two-tone means it could not: not logged in, nothing found, or Spotify's
+search did not answer; the Spotify card on the page says which. "Try a command" on the card takes a sentence as if
+you had said it, to see what it does. The search goes through Spotify's web API with the speaker's own login, which
+Spotify may limit for speakers like this one; "Spiel Spotify" and the liked songs do not need it. The speaker is
+[librespot](https://github.com/librespot-org/librespot) (`hassmic-spotify`), started by hassmic while the setting is
+on. Not yet on other models.
+
 ### Even volume steps
 
 Each point of the volume is the same step, wherever it is set from (Home Assistant, Music Assistant, the buttons, the

@@ -31,6 +31,9 @@ make host                # build/hassmic-host (PC: file audio + no wake word, SI
                          # build/donut/hassmic-qemu (ARM + real Pryon, run via tools/qrun.sh), build/otatool-host (the Echo's
                          # otatool for the PC, as tests' stand-in for the device side), build/hassmic-host-screen (the same
                          # with screen.c and the band, for tests/fake_screen.py, fake_ma_api.py). Needs libopus
+make DEVICE=donut build/donut/hassmic-spotify  # the Spotify Connect speaker (src/spotify/, Rust on librespot; in `all`
+                         # where device.mk has SPOTIFY): cargo, NDK clang as linker, Rust pinned by rust-toolchain.toml
+make build/hassmic-spotify-host  # the same for the PC (tests/fake_ha_spotify.py)
 make build/uishot        # the Echo Show's screen UI as PNG pictures, every view (FreeType; build/uishot <dir>)
 make unit                # C unit tests; ws/noise are checked against Python reference impls in .venv; the Drop In
                          # blueprint (tests/blueprint_dropin.py); one target each (unit-<name>): make -j unit runs them at once
@@ -82,6 +85,10 @@ aioesphomeapi, wyoming, aiosendspin, noiseprotocol, aiohttp):
                                              # strict: a deviation MA would only log fails; the output's clock
                                              # 500 ppm slow (HASSMIC_FAKE_MUSIC_PPM) and AudioTrack's burst at the
                                              # start (HASSMIC_FAKE_MUSIC_BURST_MS), followed without a phase step
+.venv/bin/python tests/fake_ha_spotify.py     # Spotify Connect with a stand-in speaker (tests/fake_spotify.py): started and
+                                             # announced, "Spiel Queen auf Spotify" taken before HA, its own stream,
+                                             # volumes both ways, button, error sound, rename, logout; then the real
+                                             # speaker (build/hassmic-spotify-host): getInfo, no login, end on EOF
 .venv/bin/python tests/fake_ha_stop_word.py   # "<wake word>, stop" between two Echos: the drop cancelled, stop_ends_listening
 .venv/bin/python tests/fake_ha_remote_bargein.py  # -w remote: a wake word run beside each reply, its wake word cuts the reply and
                                              # goes on as the request, "stop" after it, failed runs asked for again (3 at most)
@@ -390,6 +397,22 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   (`sbc.c`); the route is the backend's (`audio_a2dp_*` in `audio.h`): the Dots' mixer by LIPC `A2DPSourceConnect`
   plus btmanagerd's AIPC service uuid 0 via `libace_aipc.so` (`docs/re-a2dp-source.md`), Android's AudioPolicy by
   `media.audio_policy` setDeviceConnectionState (`docs/re-checkers.md`; players opened meanwhile wait for the move). While on the speaker the core has a volume of its own (`core_speaker`).
+- **Spotify** (`spotify.c`, `spotify.h`, `spotcmd.c`; `src/spotify/`, device.mk `SPOTIFY`: donut): `hassmic-spotify`
+  (Rust, librespot 0.8, no default features: rustls with webpki roots, no rodio, no mDNS responder) is run by
+  `spotify.c`'s supervisor while the setting `spotify` is on: double fork (Amazon's DHA module waits for all children),
+  effective group = hassmic's real 3990 (lockdown.sh lets that out), fds past 3 closed; ends by itself on stdin's or
+  the audio pipe's EOF.  Zeroconf (getInfo/addUser, `zeroconf.rs`) on TCP 28933, announced by a service file of ours in
+  avahi's folder (`hassmic-spotify.service`, `HASSMIC_SPOTIFY_MDNS`); login kept in `state/spotify/credentials.json`,
+  the name shown in the app in `state/spotify/name` (empty: `core_name`), device id = SHA-1 of the node name.  PCM on
+  fd 3 -> `spot_*`, a stream of its own in every backend (one writer per stream), `core_music(MUSIC_SPOTIFY)` (newest
+  wins), `music_duck`, `musiclight_feed`.  Volume: the Echo's music volume both ways (`volume` events/commands;
+  `spotify_volume_changed` beside Sendspin's and a2dp's).  Button, multi press, "stop" and Drop In pause it like
+  Sendspin.  Voice: `core_transcript` -> `spotify_command` -> `spotcmd_parse` (pure; `make unit-spotcmd`), the run
+  cancelled as a "stop"; a refusal (`result <cmd> fail ...`) plays `core_error_sound`.  Search: Web API `/v1/search`
+  with login5's token (`search.rs` picks; `make unit-spotify_rs`).  Settings `spotify`, `spotify_voice`,
+  `spotify_bitrate` (restarts it), `spotify_normalise` (restarts it); page card `spotifyCard`, `GET/POST /api/spotify`
+  (`name`, `logout`, `say <words>`).  PC: `HASSMIC_SPOTIFY` (the binary; tests: `tests/fake_spotify.py`), `HASSMIC_SPOT`
+  (its output file).  Builds byte for byte: paths remapped, SOURCE_DATE_EPOCH 0, VERGEN_IDEMPOTENT (content-id).
 - **Drop In** (`dropin.c`, `dropin.h`): calls between two Echos of the arbitration network. Signalling as signed
   `T_MSG` on arb's socket (`arb_tell`, `hooks->message`; invite/ringing/accept/refuse/bye), audio Opus 16 kHz 20 ms over
   unicast UDP 28932 (`-i`), per-call key from ephemeral X25519 + `arb_derive`. Playback on the mixer's `Voip` stream
@@ -787,7 +810,7 @@ stock behaviour. `scripts/device/` holds on-device helpers (`lockdown.sh` firewa
 Firewall invariant: Amazon's daemons may only reach local addresses; hassmic itself may reach any address (it fetches
 TTS/media URLs from HA/MA). `otad`/`ace_otad` (firmware updates) must never get out. Inbound TCP and UDP are only admitted on
 16384–32767, so every listening port (26053 ESPHome, 16700 Wyoming, 28928 Sendspin, 28929 OTA, 28931 settings page, UDP 28930 arbitration)
-must stay in that range (UDP 28932 Drop In too). Exceptions: UDP 2330 (Kiosk Satellite's fixed port), which `lockdown.sh` admits only while
+must stay in that range (UDP 28932 Drop In, TCP 28933 Spotify Connect's zeroconf too). Exceptions: UDP 2330 (Kiosk Satellite's fixed port), which `lockdown.sh` admits only while
 `state/config` says `arbitration_mode=kiosk` (`kiosk_state`), and, where device.conf has `KIOSK_PACKAGE` (and the board `kiosk`, for the settings), the app's own TCP 2324 and 6053 from private addresses while it is installed, and with `kiosk_dlna` on its DLNA renderer (`kiosk_dlna` in `lockdown.sh`: the TCP port of the app's own setting `flutter.ks.dlna.port`, read through `runas` as its user, while its uid listens there per `/proc/net/tcp*`; UDP 1900 to 239.255.255.250 only while its uid alone holds 1900; issue #109); its uid may also reach the internet unless `kiosk_internet` is off (`KSUID`). Ping (ICMP echo request) is admitted from the private
 and link-local ranges of `LOCAL4` only. A stock rule hassmic comes to depend on (INPUT or OUTPUT) goes into `keep`, worded as `iptables -S`
 prints it.

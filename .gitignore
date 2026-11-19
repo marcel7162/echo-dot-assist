@@ -8,6 +8,8 @@ device-logs/
 # local tooling and build output
 toolchain/
 build/
+# cargo run by hand in src/spotify/ (the Makefile builds into build/cargo*)
+src/spotify/target/
 .venv/
 testdata/*.wav
 testdata/corpus/.lock

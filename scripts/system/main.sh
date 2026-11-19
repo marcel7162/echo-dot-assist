@@ -825,7 +825,7 @@ ota_watch() {
                 [ -f $D/wifi.sh ] && sh $D/wifi.sh forget 2>&1 | stamped
                 st=/data/local/hassmic/state
                 for f in $st/* $st/.[!.]*; do [ -e "$f" ] || [ -L "$f" ] && rm -rf "$f"; done
-                rm -f /data/misc/avahi/services/hassmic.service
+                rm -f /data/misc/avahi/services/hassmic.service /data/misc/avahi/services/hassmic-spotify.service   # Spotify's login went with state/
                 start hassmic
                 say "== factory reset done, the satellite starts again"
                 continue

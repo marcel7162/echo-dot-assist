@@ -209,7 +209,8 @@ static struct pstream voice = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHRE
                       music = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &music_q16 },
                       earcon = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER },
                       voip = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &call_q16 },
-                      bt = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &music_q16 };
+                      bt = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &music_q16 },
+                      spot = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER, .gain = &music_q16 };
 
 /* --- volume: Android's own, the music stream's index (0..its maximum, 30 on the Show), set through IAudioService with
  * the firmware's service tool as the front end is reached (afe_parcel.c): setStreamVolume(stream, index, flags,
@@ -572,6 +573,10 @@ long long music_prime_us(void) { return 150000; }
 /* The Bluetooth speaker stream: what a phone plays to the Echo (a2dp.c), the mixer's Bluetooth stream on the Dots.
  * Here a player of its own beside music, on the music stream like everything of ours.  Until it was there (-1) the
  * phone's audio filled a2dp.c's buffer and was dropped: paired and streaming, nothing heard (2026-10-13). */
+int       spot_open(unsigned rate, unsigned channels) { return s_open(&spot, rate, channels, SL_ANDROID_STREAM_MEDIA); }
+int       spot_write(const void *data, size_t len) { return s_write(&spot, data, len); }
+long long spot_queued_us(void) { return s_queued_us(&spot); }
+void      spot_close(void) { s_close(&spot, 0); }
 int       bt_open(unsigned rate, unsigned channels) { return s_open(&bt, rate, channels, SL_ANDROID_STREAM_MEDIA); }
 int       bt_write(const void *data, size_t len) { return s_write(&bt, data, len); }
 long long bt_queued_us(void) { return s_queued_us(&bt); }

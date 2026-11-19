@@ -101,7 +101,7 @@ void play_close(int drain)
  * is modelled: bytes written minus bytes that real time has consumed since the stream started draining (it drains at
  * exactly the sample rate, and MixerGetBufPlay blocks once its ring is full, which keeps the model honest). */
 struct stream { MixerHandle h; unsigned bps; long long t0, written; atomic_int *gain; float g; };   /* g: the glide's now */
-static struct stream music = { .gain = &music_q16 }, bt = { .gain = &music_q16 }, voip = { .gain = &call_q16 };
+static struct stream music = { .gain = &music_q16 }, bt = { .gain = &music_q16 }, spot = { .gain = &music_q16 }, voip = { .gain = &call_q16 };
 
 static long long raw_us(void)
 {
@@ -155,6 +155,10 @@ long long music_queued_us(void) { return s_queued_us(&music); }
 int       music_write(const void *data, size_t len) { return s_write(&music, data, len); }
 void      music_close(void) { s_close(&music); }
 long long music_prime_us(void) { return 0; }                /* the queue is a model at playback speed: no burst */
+int       spot_open(unsigned rate, unsigned channels) { return s_open(&spot, rate, channels, MIXER_PLAY_MUSIC); }
+long long spot_queued_us(void) { return s_queued_us(&spot); }
+int       spot_write(const void *data, size_t len) { return s_write(&spot, data, len); }
+void      spot_close(void) { s_close(&spot); }
 int       bt_open(unsigned rate, unsigned channels) { return s_open(&bt, rate, channels, MIXER_PLAY_MUSIC); }
 long long bt_queued_us(void) { return s_queued_us(&bt); }
 int       bt_write(const void *data, size_t len) { return s_write(&bt, data, len); }

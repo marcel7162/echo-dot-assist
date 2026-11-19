@@ -1,0 +1,6 @@
+# The Rust the speaker is built with, pinned as the NDK is: cargo (rustup) fetches it with the Echo's target on first
+# use, here and in CI.  A newer one may change the binary (builds are compared byte for byte: scripts/content-id.sh).
+[toolchain]
+channel = "1.97.0"
+profile = "minimal"
+targets = ["armv7-linux-androideabi"]

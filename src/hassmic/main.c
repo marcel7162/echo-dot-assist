@@ -72,6 +72,7 @@
 #include "core.h"
 #include "ota.h"
 #include "sendspin.h"
+#include "spotify.h"
 #include "sounds.h"
 #include "sound.h"
 #include "whisper.h"
@@ -961,7 +962,7 @@ void core_dropin(int st, const char *peer, int outgoing)
     /* A call is the newest source, as Alexa's paused what played: music's leftovers in micAsr would open the gate and go
      * to the other side.  No resume afterwards, as between the music sources; a phone without remote control was only
      * made silent and is heard again.  Outside core_lock: sendspin takes its own lock */
-    if (st == DROPIN_LIVE && was != DROPIN_LIVE) { if (core_sendspin_port) sendspin_pause(); a2dp_pause(); }
+    if (st == DROPIN_LIVE && was != DROPIN_LIVE) { if (core_sendspin_port) sendspin_pause(); a2dp_pause(); spotify_pause(); }
     if (st == DROPIN_IDLE && was == DROPIN_LIVE) a2dp_unyield();
 }
 
@@ -1319,7 +1320,7 @@ static void trigger(int touch, uint64_t from)
 static long long music_stopped_ms;                  /* core_lock: when a stop last paused music */
 static int music_stop(void)
 {
-    int paused = (core_sendspin_port && sendspin_stop()) | a2dp_stop();     /* both: one may not have heard it yet */
+    int paused = (core_sendspin_port && sendspin_stop()) | a2dp_stop() | spotify_stop();     /* all: one may not have heard it yet */
     if (paused) music_stopped_ms = mono_ms();
     return paused;
 }
@@ -2518,6 +2519,13 @@ int core_transcript(const char *text)
         }
     }
     int hit = said(w, stops, sizeof stops / sizeof *stops);
+    /* "Spiel Spotify", "Spiel Queen auf Spotify": the speaker's (spotify.c, spotcmd.c), not the agent's; the music is
+     * the answer.  Not during a ring: any request may be the one that stops it (timer_stop_any) */
+    if (!hit && !atomic_load(&alarm_on) && spotify_command(text, kw)) {
+        if (connected && proto->cancel) { barge_in = 0; atomic_store(&streaming, 0); proto->cancel(); quiet_abort = 1; }
+        core_pipeline_finish();
+        return 1;
+    }
     if (atomic_load(&alarm_on)) {
         if (!hit && !(timer_stop_any && w[0])) return 0;
         core_alarm_stop(hit ? "said stop" : "a request during the ring");
@@ -2568,15 +2576,16 @@ int core_timer_stop_any(int set)
     return timer_stop_any;
 }
 
-/* The newest music source wins: a Bluetooth device that starts pauses the Sendspin group (the controller role; the
+/* The newest music source wins (Spotify, spotify.c, as the other two): a Bluetooth device that starts pauses the Sendspin group (the controller role; the
  * whole group, since a player cannot tell whether it has the group to itself), a Sendspin stream that starts pauses the
  * Bluetooth device (AVRCP; without it the device only goes unheard until Sendspin stops).  No automatic resume. */
 void core_music(int source, int on)
 {
     int was = on ? atomic_fetch_or(&music_on, source) : atomic_fetch_and(&music_on, ~source);
     if (on && !(was & source)) {
-        if (source == MUSIC_BLUETOOTH && was & MUSIC_SENDSPIN && core_sendspin_port) sendspin_pause();
-        if (source == MUSIC_SENDSPIN && was & MUSIC_BLUETOOTH) a2dp_pause();
+        if (source != MUSIC_SENDSPIN && was & MUSIC_SENDSPIN && core_sendspin_port) sendspin_pause();
+        if (source != MUSIC_BLUETOOTH && was & MUSIC_BLUETOOTH) a2dp_pause();
+        if (source != MUSIC_SPOTIFY && was & MUSIC_SPOTIFY) spotify_pause();
     }
     if (!on && source == MUSIC_SENDSPIN && was & MUSIC_SENDSPIN) a2dp_unyield();
     if (!was != !atomic_load(&music_on)) playback_hint();
@@ -2653,10 +2662,13 @@ static int chime_go(void)
  * same blip standing in for the wake and touch sounds keeps 6000 */
 #define BEEP_PEAK 9850
 
+static atomic_int error_pending;
+void core_error_sound(void) { atomic_store(&error_pending, 1); }
+
 static void *earcon_thread(void *arg)
 {
     enum { RATE = 48000, N = RATE * 12 / 100 };
-    static short tone[N], beep[N];
+    static short tone[N], beep[N], err[2 * N];
     static const char *const snd_names[SND_COUNT] = { "wake", "touch", "mics off", "mics on", "volume", "bluetooth connected",
                                                                 "bluetooth disconnected", "identify", "drop in", "call connected",
                                                                 "call ended", "incoming call", "outgoing call", "timer", "alarm",
@@ -2666,6 +2678,10 @@ static void *earcon_thread(void *arg)
         double f = i < N / 2 ? 880.0 : 1320.0, env = fmin(1.0, fmin(i, N - i) / (RATE * 0.01));
         tone[i] = (short)(6000 * env * sin(2 * M_PI * f * i / RATE));
         beep[i] = (short)(BEEP_PEAK * env * sin(2 * M_PI * f * i / RATE));
+    }
+    for (int i = 0; i < 2 * N; i++) {       /* 240 ms falling two-tone, the blip turned round and slower: refused */
+        double f = i < N ? 660.0 : 440.0, env = fmin(1.0, fmin(i % N, N - i % N) / (RATE * 0.01));
+        err[i] = (short)(6000 * env * sin(2 * M_PI * f * i / RATE));
     }
     for (;;) {
         if (mono_ms() > atomic_load(&timers_stale_at)) {               /* a timer Home Assistant forgot; first: a Drop In's ring continues */
@@ -2692,6 +2708,14 @@ static void *earcon_thread(void *arg)
             }
             atomic_store(&earcon_heard_until, mono_ms() + 250);         /* speaker to mic stream: 85 ms, and the room's tail */
             atomic_store(&earcon_sounding, 0);
+        }
+        if (atomic_exchange(&error_pending, 0)) {      /* a spoken command refused (spotify.c): at the sounds' volume */
+            short *quiet = scaled(err, 2 * N, atomic_load(&sounds_q16));
+            atomic_store(&earcon_sounding, 1); sound_start();
+            fprintf(stderr, "sound: refused\n");
+            play_earcon(quiet ? quiet : err, 2 * N, RATE);
+            sound_over(); free(quiet);
+            atomic_store(&earcon_heard_until, mono_ms() + 250); atomic_store(&earcon_sounding, 0);
         }
         { int r = atomic_load(&dropin_ring); const short *pcm; size_t n; unsigned rate;     /* a Drop In rings: cut off when answered */
           if (r >= 0 && mono_ms() >= atomic_load(&dropin_ring_at) && sound_get((enum sound)r, &pcm, &n, &rate)) {
@@ -2748,7 +2772,7 @@ static void on_action(void)
     pthread_mutex_lock(&core_lock);
     int busy = state == LISTENING || state == THINKING;
     pthread_mutex_unlock(&core_lock);
-    if (!busy && (a2dp_button(0) || (core_sendspin_port && sendspin_button()) || a2dp_button(1))) return;
+    if (!busy && (a2dp_button(0) || (core_sendspin_port && sendspin_button()) || spotify_button() || a2dp_button(1))) return;
     atomic_store(&trigger_pending, 2);                  /* 2: touch */
 }
 
@@ -2765,7 +2789,7 @@ static void on_multi(int n)
     pthread_mutex_unlock(&core_lock);
     /* a Drop In in any state (a call ringing here included) is the single press's to answer or end, never a skip */
     int call = dropin_running() && dropin_status(NULL, 0) != DROPIN_IDLE;
-    if (!busy && !call && (a2dp_skip(dir) || (core_sendspin_port && sendspin_skip(dir)))) return;
+    if (!busy && !call && (a2dp_skip(dir) || (core_sendspin_port && sendspin_skip(dir)) || spotify_skip(dir))) return;
     on_action();
 }
 
@@ -3082,6 +3106,7 @@ void core_speaker(int mode, int pct)
         if (connected && proto->volume_changed) proto->volume_changed(volume);
         if (core_sendspin_port) sendspin_volume_changed(volume);
         a2dp_volume_changed(volume);
+        spotify_volume_changed(volume);
     }
     pthread_mutex_unlock(&core_lock);
 }
@@ -3109,6 +3134,7 @@ void core_set_volume(int v)
     if (connected && proto->volume_changed) proto->volume_changed(volume);
     if (core_sendspin_port) sendspin_volume_changed(volume);
     a2dp_volume_changed(volume);
+    spotify_volume_changed(volume);
 }
 
 /* Speaker equalizer: the mixer's own user EQ (libasp "ASP/UserEq"), which stock set from the Alexa app through PuffinApp.
@@ -3340,6 +3366,7 @@ static void volume_sync(void)
             if (connected && proto->volume_changed) proto->volume_changed(volume);
             if (core_sendspin_port) sendspin_volume_changed(volume);
             a2dp_volume_changed(volume);
+            spotify_volume_changed(volume);
         } else if (main_v != want) {                                /* the loudest of three: ours again */
             fprintf(stderr, "volume: MainVolume %d changed outside, %d again (%s)\n", main_v, want, vol_split ? "separate volumes" : "even steps");
             main_written = -1;
@@ -3776,6 +3803,7 @@ int main(int argc, char **argv)
     else if (buttons_muted()) mute_latch(1, 0);
 
     if (core_sendspin_port) sendspin_start(core_sendspin_port);
+    spotify_start();                                         /* runs the speaker while the setting is on (spotify.c) */
     if (use_bt) a2dp_start(NULL);
     static const struct improv_hooks improv_hooks = { web_attention, improv_authorized };
     if (use_bt) improv_start(&improv_hooks);                 /* setup over Bluetooth, when there is no network (improv.c) */

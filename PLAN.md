@@ -4380,3 +4380,39 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       builder made then had no VERSION, libhmled.so, hassmic_rcpi4m.ko or latency (an update's files): on it the light
       ring has no Home Assistant light, no Wi-Fi motion, and the logs say "factory".  The builder's `--port` takes a
       bundle's files whole now, VERSION and update.pub included; this unit keeps the old copy until a reflash.
+
+## Spotify Connect — 2026-11-19
+
+- [~] **Spotify Connect and Spotify by voice on donut, 2026-11-19.**  Built and tested on the PC only: no Echo, no
+      Spotify account in the loop yet.  `src/spotify/` (`hassmic-spotify`): Rust on librespot 0.8.0 (`=` pinned, Cargo.lock;
+      vergen held at 9.0.6, 9.1 breaks librespot-core's build script), no default features: no rodio/cpal, rustls with
+      webpki roots (no OpenSSL; the Echo's CA store is from 2018), no mDNS responder: `zeroconf.rs` serves getInfo/addUser
+      itself on TCP 28933 (librespot-discovery's server is not public and its crate always starts libmdns, which would
+      sit beside Amazon's avahi on 5353); the record is a service file of hassmic's in avahi's folder while
+      the speaker runs.  PCM (s16 stereo 44.1 kHz) on fd 3, commands on stdin, events on stdout (`main.rs` lists them);
+      librespot attenuates nothing (`EchoMixer`): the Echo's music volume is the speaker's, both ways, equal values end
+      the echo.  armv7-linux-androideabi with the NDK's clang (API 24): 3.4 MB, NEEDED libc/libm/libdl only, byte for
+      byte the same from a clean build (paths remapped, SOURCE_DATE_EPOCH 0, vergen idempotent, no build id), and the
+      same for every commit that leaves src/spotify/ alone (content-id: no beta for doc changes).  hassmic's side
+      `spotify.c`: double fork (Amazon's DHA module waits for all children), effective group = the real 3990 so
+      lockdown.sh lets its sockets out (`net_socket` does the same per socket in hassmic), descriptors past 3 closed,
+      restarted 5 s doubling to 60 s while it ends within a minute, killed 5 s after a "quit" it ignored; its own stream
+      in every backend (`spot_open`: `music_*` has one writer, Sendspin), opened with the first PCM and closed 300 ms
+      after the last, which is what `core_music` hears (MUSIC_SPOTIFY: the newest source wins both ways), ducked as
+      Sendspin, fed to the ring's music effects.  Voice: `spotcmd.c` (German and English; only sentences with
+      "Spotify" start or search; next/previous/pause without it only while Spotify plays here), called from
+      `core_transcript` before the agent, the run cancelled as a "stop" is; refusals play `core_error_sound` (a falling
+      660/440 Hz two-tone).  Search: Web API `/v1/search` with login5's token, exact name in the order artist, playlist,
+      album, track, else Spotify's first track; artist/playlist/album load as a context, a track alone.  "Spiel
+      Spotify": `play` if paused here, else Connect's transfer to this device; nothing playing after 5 s: the liked
+      songs (`spotify:user:<name>:collection`).  Page: Spotify card on Music & Bluetooth, `GET/POST /api/spotify`
+      (state, `name`, `logout`, `say`).  Tests: `make unit-spotcmd` (40 sentences), `make unit-spotify_rs` (zeroconf's
+      crypto against a phone's sealing, picking results), `tests/fake_ha_spotify.py` (a stand-in speaker,
+      `tests/fake_spotify.py`, and the real one for getInfo, a refused addUser, "play" without a login, its end on
+      EOF).  Open, on the Echo: (1) a login from the Spotify app through avahi's record (the TXT records `VERSION`,
+      `CPath`, `Stack` as librespot's); (2) bionic's resolver for the Rust binary (getaddrinfo through netd, as hassmic)
+      and rustls against Spotify's servers; (3) CPU on the Dot 3's A53s at 320 kbit/s (Vorbis decode, rustls) beside
+      the front end and Pryon; (4) whether Spotify's Web API still answers librespot's login5 token for /v1/search
+      (it limited third-party clients through 2025): "Spiel Spotify" and the liked songs do not need it; (5) the SELinux
+      domain: the child stays in hassmic's (`allow hassmic * * *`), so nothing new expected.  Not on the other models:
+      device.mk `SPOTIFY` names the Rust target where it is wanted (armv7 for the 32-bit Android ones too).

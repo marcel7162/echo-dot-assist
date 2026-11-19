@@ -33,6 +33,14 @@ long long music_prime_us(void);
 void      audio_music_gain(float gain);
 void      audio_call_gain(float gain);
 
+/* Spotify's stream (spotify.c): like the music stream, beside it.  A stream of its own because each stream has one
+ * writer: Sendspin's keeps music_*, the phone's Bluetooth audio bt_*; the mixer mixes them all, and core_music pauses
+ * the older source when a newer one starts */
+int       spot_open(unsigned rate, unsigned channels);
+int       spot_write(const void *data, size_t len);
+long long spot_queued_us(void);
+void      spot_close(void);
+
 /* Bluetooth speaker stream: like the music stream, beside it */
 int       bt_open(unsigned rate, unsigned channels);
 int       bt_write(const void *data, size_t len);

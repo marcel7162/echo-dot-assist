@@ -146,9 +146,23 @@ jobs:
         if: matrix.ksrc && steps.kernel.outputs.cache-hit != 'true'
         run: make -s kernel-tools DEVICE=${{ matrix.device }} STUBS=1
 
+      # Spotify Connect's speaker (device.mk SPOTIFY: donut so far) is Rust: src/spotify/rust-toolchain.toml names the
+      # toolchain, which rustup (on the runner) installs on first use; the crates are pinned by Cargo.lock
+      - name: Cargo cache
+        if: ${{ !env.ACT && matrix.device == 'donut' }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            build/cargo
+          key: cargo-${{ matrix.device }}-${{ hashFiles('src/spotify/Cargo.lock', 'src/spotify/rust-toolchain.toml') }}
       - name: Build
         run: |
           make -j"$(nproc)" DEVICE=${{ matrix.device }} STUBS=1 RELEASE=1 all build/otatool-host
+          # a model with the speaker must not lose it from its bundle
+          spot=$(sed -n 's/^SPOTIFY *:= *//p' devices/${{ matrix.device }}/device.mk)
+          [ -z "$spot" ] || [ -f build/${{ matrix.device }}/hassmic-spotify ] || { echo "::error::hassmic-spotify not built"; exit 1; }
           [ "$(make -s version RELEASE=1)" = "${{ needs.version.outputs.version }}" ]
           # make leaves Wi-Fi motion's module out with a note when it cannot build it: a bundle must not lose it that way
           kmod=$(sed -n 's/^KMOD *:= *//p' devices/${{ matrix.device }}/device.mk)
@@ -188,6 +202,7 @@ jobs:
             build/${{ matrix.device }}/*.ko
             build/${{ matrix.device }}/libhmui.so
             build/${{ matrix.device }}/libhmled.so
+            build/${{ matrix.device }}/hassmic-spotify
           if-no-files-found: error
 
   test:
@@ -214,8 +229,19 @@ jobs:
       - name: Python packages
         timeout-minutes: 5
         run: uv sync --locked           # .venv exactly as uv.lock says; fails if pyproject.toml changed without uv lock
+      # the Spotify speaker's own tests and its PC build (tests/fake_ha_spotify.py): Rust as src/spotify/rust-toolchain.toml
+      # pins it, installed by the runner's rustup on first use
+      - name: Cargo cache
+        if: ${{ !env.ACT }}
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            build/cargo-host
+          key: cargo-host-${{ hashFiles('src/spotify/Cargo.lock', 'src/spotify/rust-toolchain.toml') }}
       - name: Build
-        run: make -j"$(nproc)" build/hassmic-host build/hassmic-host-screen build/otatool-host
+        run: make -j"$(nproc)" build/hassmic-host build/hassmic-host-screen build/otatool-host build/hassmic-spotify-host
       # tests/run.py starts every test at once, each in a network namespace of its own (unshare -rn: the tests' ports
       # and hassmic's defaults would collide); they mostly wait on audio at real time and on hassmic's timers, so the
       # job takes about as long as the slowest one; one that fails under that load runs again alone (a warning if it

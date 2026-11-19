@@ -2,6 +2,18 @@
 
 What changed for people using the Echo, newest first. Details and measurements are in [PLAN.md](PLAN.md).
 
+## 2026-11-19 — Spotify on the Echo Dot 3
+
+- **The Echo Dot 3 is a Spotify Connect speaker again, and plays Spotify by voice.** Switch on "Spotify Connect" on
+  the settings page (Music & Bluetooth), pick the Echo in the Spotify app once, and it plays like a speaker Alexa
+  ran: the app's volume slider and the Echo's buttons move together, the action button pauses, the assistant ducks
+  it, and whatever you start last wins over Music Assistant or a phone. "Spiel Spotify" plays on what you last
+  heard; "Spiel Queen auf Spotify", "Spiel die Playlist … auf Spotify" or "Play the album … on Spotify" search
+  Spotify; "Nächstes Lied" and "Pause" work while Spotify plays. Home Assistant never sees these sentences. A falling
+  two-tone says when it could not, and the page says why. The page's Spotify card shows who is logged in and what
+  plays, renames the speaker in the app, logs out, and lets you try a sentence by typing it. Spotify Premium is
+  needed; built on librespot. Untested on a real Echo so far: tell us how it goes.
+
 ## 2026-11-18 — The language you speak, from the right time zone
 
 - **A Portuguese "Alexa" in Brazil finds where the wake word ends by its sounds again.** Since more languages came to

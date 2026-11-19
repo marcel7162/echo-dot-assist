@@ -267,6 +267,10 @@ const HELP = {
   light_band: { help: 'The Echo Show has no light ring: it shows the ring\'s lights as a band along the bottom of the screen, as Alexa did. That is listening, thinking, mic off, calls, volume, timers and Home Assistant\'s "Light ring". This many pixels at the bottom are kept for it, so an app on the screen never has the band over it. 0 gives the whole screen to the apps and shows no band. Default 10, stock\'s line.' },
   bluetooth_announcements: { help: 'Says "Connected to …" and "Disconnected from …" when a phone connects, in your voice assistant\'s voice, after the chime. Home Assistant speaks the words, and only once "Allow the device to perform Home Assistant actions" is ticked in this Echo\'s ESPHome options (Settings → Devices & services → ESPHome → the Echo → Configure); without it there is the chime only.' },
   bluetooth_announcement_language: { help: 'The language of those sentences. Home Assistant does not tell the Echo which language your voice assistant speaks, so pick the one that matches its voice.' },
+  spotify: { help: 'The Echo as a Spotify Connect speaker, as Alexa had it: open Spotify on a phone or computer in the same network, tap the device icon and pick this Echo. The first time logs it in with your account (Spotify Premium is needed: Spotify lets no other account play on speakers); the login is kept on the Echo, so "Spiel Spotify" works afterwards without the app. Your password never reaches the Echo, only a key for this speaker that the app hands it. The music plays on the Echo\'s music volume, ducks under the assistant like Music Assistant\'s, and the action button pauses it. Whoever starts something last plays: Spotify pauses Music Assistant and Bluetooth, and they pause Spotify.' },
+  spotify_voice: { parent: 'spotify', help: 'Sentences with "Spotify" in them go to Spotify instead of Home Assistant: "Spiel Spotify" (what you played last, here or anywhere, else your liked songs), "Spiel meine Lieblingssongs auf Spotify", "Spiel Queen auf Spotify", "Spiel die Playlist Chillout auf Spotify", "Spiel das Album Thriller auf Spotify", "Spiel Musik von Adele auf Spotify", the same in English ("Play Queen on Spotify"). While Spotify plays here, "Nächstes Lied", "Vorheriges Lied" and "Pause" are its too. The music starting is the answer; a falling two-tone means it could not (not logged in, nothing found): the card says why. Searches use Spotify\'s web API, which Spotify may limit for speakers like this one.' },
+  spotify_bitrate: { parent: 'spotify', help: 'Spotify\'s Ogg Vorbis quality. 320 kbit/s sounds best and uses about 145 MB an hour; 96 kbit/s suits a weak Wi-Fi. The speaker starts again when you change it.' },
+  spotify_normalise: { parent: 'spotify', help: 'Plays every track at about the same loudness, as the Spotify app\'s "Normalise volume". The speaker starts again when you change it.' },
   sendspin_unpaired: { help: 'Lets any Music Assistant server on the network play here without pairing. Off: only a server given this Echo\'s "Sendspin pairing token" (a diagnostic entity in Home Assistant) may play.' },
   https_verify: { help: 'Whether the Echo checks the certificate of a Home Assistant that serves HTTPS itself. Home Assistant then gives the Echo https:// addresses for its spoken replies and announcements, usually its external URL. On (the default): the Echo plays them only from a server whose certificate a known authority signed for that very name, as a browser would. A self-signed certificate, or one that does not name the address Home Assistant gives out, is refused: replies stay silent and the log says why. Off: any certificate is taken, so someone on your network could pass the Echo audio of their own instead of Home Assistant\'s. Plain http:// addresses are not affected.' },
   kiosk_internet: { help: 'Kiosk Satellite may reach the internet while this is on: for its own updates and for web pages it shows (iframes, dashboards). Only that app gets out: the Echo\'s own voice satellite stays on your network except for what it needs, and Amazon\'s software stays cut off. Off: it reaches your network only, so it shows Home Assistant but cannot update itself or load outside pages. On by default. Takes effect within seconds.' },
@@ -477,6 +481,10 @@ const SUB = {
   bluetooth_announcements: 'Says when a phone connects or disconnects',
   bluetooth_announcement_language: 'The language of those sentences',
   sendspin_unpaired: 'Any Music Assistant server may play here',
+  spotify: 'The Echo as a speaker in the Spotify app',
+  spotify_voice: '"Spiel Spotify", "Spiel Queen auf Spotify"',
+  spotify_bitrate: 'Higher sounds better, lower needs less Wi-Fi',
+  spotify_normalise: 'Every track at about the same loudness',
   https_verify: 'Checks the certificate of an HTTPS Home Assistant',
   kiosk_internet: 'Kiosk Satellite may reach the internet',
   kiosk_mic: 'Kiosk Satellite may use the microphone',
@@ -519,6 +527,7 @@ const CHOICE_NAMES = {
   drop_in_answer: { auto: 'At once', ask: 'After the action button' },
   call_mic: { call: 'Amazon\'s call processing', assistant: 'The assistant\'s' },
   music_on_screen: { off: 'Off', face: 'In place of the face', home: 'In place of the home app too' },
+  spotify_bitrate: { 96: '96 kbit/s', 160: '160 kbit/s', 320: '320 kbit/s' },
   timer_sound: { beep: 'Beep', timer: 'Alexa timer', alarm: 'Alexa alarm', custom: 'Your own' },
   end_of_request: { off: 'Off', relaxed: 'Relaxed', normal: 'Normal', aggressive: 'Aggressive' },
   bluetooth_announcement_language: { en: 'English', de: 'Deutsch', fr: 'Français', es: 'Español', it: 'Italiano', pt: 'Português', nl: 'Nederlands',
@@ -684,6 +693,7 @@ async function load() {
   }
   $('app').classList.remove('hidden');            // before render(): a hidden page has no widths to place cards by, nothing to scroll to
   render();
+  if (state.settings.some((s) => s.name === 'spotify')) getSpotify().catch(() => {});
   if (mwwBox) getMww().catch(() => {});                                  // the engine and its models, as Home Assistant may have picked
   if (load.started && unseen()) refreshDevices().catch(() => {});        // a new Echo in the beacons: show it now, not next round
   else if (load.started && !devRun && othersShown()) refreshMine().catch(() => {});   // a setting changed here or from HA: copy offers the new value
@@ -1241,9 +1251,10 @@ const PAGE_BUILD = {
   },
   media: (el, list) => {
     const parent = (k) => (HELP[k.name] || {}).parent, plain = list.filter((x) => !x.feature && !parent(x));
-    const music = plain.filter((x) => x.group === 'Music'), bt = plain.filter((x) => x.group !== 'Music');
+    const spot = list.filter((x) => x.name === 'spotify' || parent(x) === 'spotify');
+    const music = plain.filter((x) => x.group === 'Music' && !spot.includes(x)), bt = plain.filter((x) => x.group !== 'Music');
     const api = state.mass ? h('div', { id: 'mass' }, massRow()) : null;     // models with a screen: its music pages
-    el.append(flow([music.length || api ? titled('Music Assistant', api, music.map(settingRow)) : null, bt.length ? titled('Announcements', bt.map(settingRow)) : null,
+    el.append(flow([music.length || api ? titled('Music Assistant', api, music.map(settingRow)) : null, spot.length ? spotifyCard(spot) : null, bt.length ? titled('Announcements', bt.map(settingRow)) : null,
       ...list.filter((x) => x.feature).map((s) => featureCard(s, list.filter((k) => parent(k) === s.name)))].filter(Boolean)));
   },
   features: (el, list) => {
@@ -1420,6 +1431,7 @@ const FINDABLE = [
   ['Sounds', 'voice', 'sounds', 'wake sound chime earcon ringtone your own upload replace'],
   ['Sound packs', 'voice', 'sound-packs', 'sets themes share file soundpack'],
   ['Wi-Fi', 'system', 'wifi', 'network switch password ssid'],
+  ['Spotify account', 'media', 'spotify-account', 'spotify login logout connect speaker name rename try command', () => !!state.spotify],
   ['Music Assistant on the screen', 'media', 'mass', 'token library browse queue speakers groups api', () => !!state.mass],
   ['Home app', 'screen', 'home-app', 'kiosk satellite face launcher start screen'],
   ['Settings file', 'system', 'settings-file', 'export import backup preset'],
@@ -3000,6 +3012,79 @@ function infoRow(title, sub, help, ctl, extra, val) {
   return h('div', { class: 'row info' },
     h('div', { class: 'row-t' }, h('div', { class: 'row-label' }, h('span', {}, title), more ? more.btn : null), val || null, h('p', { class: 'help' }, sub)),
     h('div', { class: 'ctl btns' }, ctl), more ? more.panel : null, extra || null);
+}
+
+// ---------------------------------------------------------------- Spotify Connect (spotify.c, src/spotify/)
+
+let spotCtl = null;
+// what came of the last spoken (or tried) command: src/spotify/src/main.rs "result"
+const SPOT_FAIL = { nologin: 'not logged in: pick the Echo once in the Spotify app', notfound: 'Spotify found nothing for it',
+  error: 'Spotify did not answer (its web API may be limiting this speaker)', notrunning: 'the speaker was not running' };
+function spotResult(r) {
+  if (!r) return '';
+  const [how, ...rest] = r.split(' '), what = rest.join(' ');
+  if (how === 'fail') return `Last command failed: ${SPOT_FAIL[what] || what}`;
+  if (what === 'liked') return 'Last command: your liked songs';
+  if (what === 'resumed' || what === 'playing') return 'Last command: playing on';
+  const [kind, ...name] = rest;
+  return `Last command: ${{ track: 'the song', artist: 'the artist', album: 'the album', playlist: 'the playlist' }[kind] || kind} ${name.join(' ')}`;
+}
+
+async function getSpotify() {
+  state.spotify = (await echo.call('GET', '/api/spotify')).json();
+  if (spotCtl) spotCtl.paint();
+}
+
+async function spotSend(body, ok) {
+  try { state.spotify = (await echo.call('POST', '/api/spotify', body)).json(); if (ok) toast(ok); }
+  catch (e) { toast(errText(e)); }
+  if (spotCtl) spotCtl.paint();
+}
+
+// The Spotify card: its switch, then who is logged in and what plays, the name it shows in the app, the other settings,
+// and a box to try a sentence as if it were spoken
+function spotifyCard(list) {
+  const main = list.find((s) => s.name === 'spotify'), rest = list.filter((s) => s !== main);
+  const acct = h('div', { class: 'row-val' }), acctBtns = h('span', { class: 'btns' });
+  const nameVal = h('div', { class: 'row-val' });
+  const tryIn = h('input', { type: 'text', id: 'spotify-try', placeholder: 'Spiel Queen auf Spotify' });
+  const tried = h('p', { class: 'help' });
+  const extra = h('div', { class: 'spot-extra' },
+    h('div', { id: 'spotify-account' }, infoRow('Account', 'Who the speaker plays for, and what plays',
+      'Open Spotify on a phone or computer in the same network as the Echo, tap the device icon (Spotify Connect) and pick this Echo by the name below: that logs it in with the account the app uses. Another account can take it over the same way. Log out forgets the login on the Echo; the Spotify app then shows it as a speaker to pick again.',
+      acctBtns, null, acct)),
+    infoRow('Name in the Spotify app', 'How the speaker is listed in Spotify Connect', 'Empty: the Echo\'s own name. The speaker starts again with the new name; the app keeps knowing it as the same device.',
+      h('button', { onclick: async () => {
+        const sp = state.spotify || {};
+        const v = await ask({ title: 'Name in the Spotify app', ok: 'Save', check: (x) => /[<>&]/.test(x) ? 'Without < > &' : null,
+          body: ['How this Echo is listed when you pick a speaker in Spotify. The speaker starts again with it.'],
+          input: { label: `Name (empty: ${sp.default_name || 'the Echo\'s'})`, value: sp.name || '', max: 79 } });
+        if (v !== null) spotSend(`name ${v.trim()}`.trim(), 'Saved: the speaker starts again with that name');
+      } }, 'Rename…'), null, nameVal),
+    ...rest.map(settingRow),
+    infoRow('Try a command', 'Type a sentence as you would say it', 'Takes the sentence as if speech-to-text had written it after the wake word: it plays on Spotify, or the page says Home Assistant would get it.',
+      null, h('div', { class: 'field' }, h('label', { for: 'spotify-try' }, 'Sentence'), h('div', { class: 'btns' }, tryIn, h('button', { onclick: async () => {
+        const t = tryIn.value.trim(); if (!t) return;
+        try {
+          const r = (await echo.call('POST', '/api/spotify', `say ${t}`)).json();
+          if (r.said === false) tried.textContent = 'Not a Spotify command: Home Assistant would answer it.';
+          else { state.spotify = r; tried.textContent = 'Sent to Spotify.'; setTimeout(() => getSpotify().catch(() => {}), 2500); }
+        } catch (e) { toast(errText(e)); }
+        if (spotCtl) spotCtl.paint();
+      } }, 'Try')), tried)));
+  spotCtl = { paint: () => {
+    const sp = state.spotify || {}, on = settingValue('spotify');
+    extra.classList.toggle('hidden', !on);
+    const what = !sp.present ? 'Not in this build' : !sp.running ? (sp.error ? `Not running (${sp.error})` : 'Starting…') : sp.logged_in ? `Logged in as ${sp.user}` : 'Not logged in';
+    const sub = [sp.playing && sp.title ? `Playing ${sp.artist ? sp.artist + ' – ' : ''}${sp.title}` : null,
+      sp.running && !sp.logged_in ? `pick "${sp.name || sp.default_name}" in the Spotify app` : null, spotResult(sp.result)].filter(Boolean);
+    acct.replaceChildren(what, h('span', { class: 'row-val-sub' }, sub.join(' · ')));
+    acctBtns.replaceChildren(...[sp.logged_in ? h('button', { onclick: () => spotSend('logout', 'Logged out of Spotify') }, 'Log out') : null].filter(Boolean));
+    nameVal.replaceChildren(sp.name || sp.default_name || '');
+  } };
+  const card = titled('Spotify', main ? settingRow(main) : null, extra);
+  spotCtl.paint();
+  return card;
 }
 
 // ---------------------------------------------------------------- Music Assistant's API (mass.c: the screen's music pages)
