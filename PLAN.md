@@ -4430,3 +4430,9 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       4.5 MB instead of 3.4).  (4) The access point on 4070 hung in SYN_SENT on that network: `ap_port` 443.  Also: a
       "quit" during the wait between tries was not read (hassmic killed it after 5 s), now it is.  Next: the same Echo
       with these, then playback (CPU at 320 kbit/s, the volume both ways, the button).
+      Then, 2026-11-19: logged in (an access point on 443, "Authenticated"), but every track's key refused ("error
+      audio key 0 1", librespot then reads it undecrypted and the MP3 probe gives up): librespot built for Android
+      speaks as Spotify's Android app.  The patched librespot-core says Linux on Android (`config.rs` `OS`): the
+      desktop client id, platform and version, as librespot on a Raspberry Pi.  A login stored with the Android
+      client id may need picking the Echo in the app once more.  Also: the speaker outlived a restarted hassmic while
+      stuck connecting (port 28933 taken): stdin now on a thread of its own, its end exits the process.

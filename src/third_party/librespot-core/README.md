@@ -1,7 +1,7 @@
 # librespot-core 0.8.0, patched for hassmic
 
 The core of [librespot](https://github.com/librespot-org/librespot), as published on crates.io (`librespot-core`
-0.8.0), used by the Spotify speaker (`src/spotify/`, `[patch.crates-io]` in its `Cargo.toml`). Three changes,
+0.8.0), used by the Spotify speaker (`src/spotify/`, `[patch.crates-io]` in its `Cargo.toml`). Four changes,
 each marked "hassmic" in the code:
 
 - `src/util.rs` `solve_hash_cash`: the hash cash challenges Spotify sets before a client token and a login5 token
@@ -10,6 +10,10 @@ each marked "hassmic" in the code:
 - `build.rs`: fixed version strings instead of asking git and the clock (inside this repository git named hassmic's
   commit, so the binary changed with every commit). Its build dependencies (vergen-gitcl, rand, rand_distr) are out of
   `Cargo.toml` with it.
+- `src/config.rs` `OS`: "linux" on Android. Built for the Echos (Android), librespot spoke to Spotify as its
+  Android app (client id, platform, version), and Spotify refused that client the key of every track ("error audio
+  key 0 1"): nothing played. As on Linux it is the desktop client librespot is tested as (upstream's handshake
+  already sends Linux for Android).
 - `src/lib.rs`: one `allow` for a lint upstream's code sets off, which Cargo shows for a path dependency (one from
   crates.io has its lints capped).
 
