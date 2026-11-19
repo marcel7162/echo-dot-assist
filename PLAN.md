@@ -4466,3 +4466,9 @@ word and echo cancellation in a room, all checked on our unit (2026-11-15).
       build generation, mixer and libraries (biscuit's README).  Builds (bundle 81 files, the runtime in it); untried
       on a Dot 2.  Differences to watch: its 32-bit kernel (no `cp15_barrier` to set: barriers native, soloist_prep
       skips it), CPU beside the front end and Pryon at 320 kbit/s.
+- [~] **Two Echos with Soloist were one speaker, 2026-11-19.**  The Dot 2 showed up in the app under the Dot 3's name
+      and its connections failed.  Soloist takes its device id from `/etc/machine-id` (else `/var/lib/dbus/machine-id`,
+      strings of v1.3.10), which neither Echo has, so both fell back alike.  Root's `soloist_prep` now writes one per
+      Echo (MD5 of "hassmic soloist <Wi-Fi MAC>") into `run/machine-id`, linked as `/system/etc/machine-id`.  A login
+      Soloist kept under the old id does not decrypt any more: the Echo is picked in the app once more.  Soloist's
+      "ready, device_name=… device_id=…" line now reaches boot.log, to compare the two.

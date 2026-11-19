@@ -165,7 +165,7 @@ stock_apps() {      # stock_apps "LIST": those in REMOVED, the rest back where t
 if [ "$MODE" = uninstall ]; then
     stock_apps ""
     # Soloist's links in /etc (main.sh soloist_prep): only ours
-    for l in /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt; do
+    for l in /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt /system/etc/machine-id; do
         case "$(readlink $l 2>/dev/null)" in /data/local/hassmic/run/*) rm -f $l;; esac
     done
     rmdir /system/etc/ssl/certs /system/etc/ssl 2>/dev/null

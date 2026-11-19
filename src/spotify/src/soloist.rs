@@ -210,6 +210,7 @@ fn ctl(o: &Opts, args: &[&str]) -> bool {
 fn keep_log(l: &str) -> bool {
     l.contains(" E [") || l.contains(" W [") || l.contains("logged in as") || l.contains("waiting for login") || l.contains("client expires")
         || l.contains("] playing spotify:") || l.contains("hmpulse:")
+        || l.contains("ready, device_name=")     // its device id: one per Echo (main.sh soloist_prep's machine-id)
 }
 
 struct Shared {

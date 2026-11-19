@@ -714,15 +714,26 @@ soloist_prep() {
     fi
     cmp -s $D/ca-certificates.crt $SOLRUN/ca-certificates.crt ||
         { cp $D/ca-certificates.crt $SOLRUN/ca.new && chmod 644 $SOLRUN/ca.new && mv $SOLRUN/ca.new $SOLRUN/ca-certificates.crt; }
-    [ "$(readlink /system/etc/resolv.conf)" = $SOLRUN/resolv.conf ] && [ "$(readlink /system/etc/ssl/certs/ca-certificates.crt)" = $SOLRUN/ca-certificates.crt ] && return 0
+    # Soloist's Spotify device id comes from /etc/machine-id (else /var/lib/dbus/machine-id), which no Echo has: without
+    # it two Echos were one speaker to the app (the Dot 2 listed under the Dot 3's name, its connections failing).
+    # One per Echo from its Wi-Fi MAC, the same across updates and resets
+    local mac mid; mac=$(cat /sys/class/net/$WLAN/address 2>/dev/null)
+    if [ -n "$mac" ]; then
+        mid=$(echo "hassmic soloist $mac" | md5sum); mid=${mid%% *}
+        [ "$(cat $SOLRUN/machine-id 2>/dev/null)" = "$mid" ] ||
+            { echo "$mid" > $SOLRUN/machine-id.new && chmod 644 $SOLRUN/machine-id.new && mv $SOLRUN/machine-id.new $SOLRUN/machine-id; echo "soloist: machine id from the Wi-Fi MAC"; }
+    fi
+    [ "$(readlink /system/etc/resolv.conf)" = $SOLRUN/resolv.conf ] && [ "$(readlink /system/etc/ssl/certs/ca-certificates.crt)" = $SOLRUN/ca-certificates.crt ] &&
+        [ "$(readlink /system/etc/machine-id)" = $SOLRUN/machine-id ] && return 0
     $D/otatool remount rw /system/etc || { echo "soloist: cannot remount /system for /etc's links"; return 0; }
     mkdir -p /system/etc/ssl/certs && chmod 755 /system/etc/ssl /system/etc/ssl/certs
-    rm -f /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt
+    rm -f /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt /system/etc/machine-id
     ln -s $SOLRUN/resolv.conf /system/etc/resolv.conf; ln -s $SOLRUN/ca-certificates.crt /system/etc/ssl/certs/ca-certificates.crt
-    chcon -h u:object_r:system_file:s0 /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt 2>/dev/null
+    ln -s $SOLRUN/machine-id /system/etc/machine-id
+    chcon -h u:object_r:system_file:s0 /system/etc/resolv.conf /system/etc/ssl/certs/ca-certificates.crt /system/etc/machine-id 2>/dev/null
     chcon u:object_r:system_file:s0 /system/etc/ssl /system/etc/ssl/certs 2>/dev/null
     sync; $D/otatool remount ro /system/etc
-    echo "soloist: /etc/resolv.conf and /etc/ssl/certs/ca-certificates.crt link to $SOLRUN"
+    echo "soloist: /etc/resolv.conf, /etc/ssl/certs/ca-certificates.crt and /etc/machine-id link to $SOLRUN"
 }
 
 # Whenever the address changes, wifi.sh writes down which network the Echo is on, for the page: wpa_supplicant can also
