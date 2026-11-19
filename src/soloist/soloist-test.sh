@@ -41,7 +41,8 @@ fi
 chmod 755 $D $D/soloist $D/*.so* 2>/dev/null
 mkdir -p $D/data $D/cache; chown -R $U $D/data $D/cache
 
-$H/runas $U aipc,audio $H/mixplay -t Music -r 44100 -c 2 -l 28940 &
+# inet: Android lets only that group open sockets, a listening one too ("listen: Permission denied" without it)
+$H/runas $U aipc,audio,inet $H/mixplay -t Music -r 44100 -c 2 -l 28940 &
 MP=$!
 trap 'kill $MP 2>/dev/null' EXIT INT TERM
 sleep 1
