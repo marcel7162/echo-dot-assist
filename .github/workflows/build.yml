@@ -146,10 +146,10 @@ jobs:
         if: matrix.ksrc && steps.kernel.outputs.cache-hit != 'true'
         run: make -s kernel-tools DEVICE=${{ matrix.device }} STUBS=1
 
-      # Spotify Connect's speaker (device.mk SPOTIFY: donut so far) is Rust: src/spotify/rust-toolchain.toml names the
+      # Spotify Connect's speaker (device.mk SPOTIFY: donut, biscuit) is Rust: src/spotify/rust-toolchain.toml names the
       # toolchain, which rustup (on the runner) installs on first use; the crates are pinned by Cargo.lock
       - name: Cargo cache
-        if: ${{ !env.ACT && matrix.device == 'donut' }}
+        if: ${{ !env.ACT && (matrix.device == 'donut' || matrix.device == 'biscuit') }}
         uses: actions/cache@v6
         with:
           path: |
@@ -159,7 +159,6 @@ jobs:
           key: cargo-${{ matrix.device }}-${{ hashFiles('src/spotify/Cargo.lock', 'src/spotify/rust-toolchain.toml') }}
       # Spotify Soloist's runtime (device.mk SOLOIST): glibc for 32-bit ARM and a libpulse of ours built against it
       - name: Soloist runtime tools
-        if: matrix.device == 'donut'
         run: |
           grep -q '^SOLOIST' devices/${{ matrix.device }}/device.mk || exit 0
           sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf libc6-armhf-cross libatomic1-armhf-cross libgcc-s1-armhf-cross libpulse-dev

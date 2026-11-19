@@ -685,7 +685,7 @@ one Echo. The log says
 
 ### Spotify
 
-On the Echo Dot 3, the Echo is a Spotify Connect speaker, as with Alexa, and plays Spotify when you ask it to. Switch
+On the Echo Dot 3 and Echo Dot 2, the Echo is a Spotify Connect speaker, as with Alexa, and plays Spotify when you ask it to. Switch
 on "Spotify Connect" on the settings page (Music & Bluetooth). Then open Spotify on a phone or computer in the same
 network, tap the device icon and pick the Echo: that logs it in with the app's account. Spotify only lets **Premium**
 accounts play on speakers like this one. Your password never reaches the Echo. The app hands it a key for this

@@ -21,6 +21,8 @@ What changed for people using the Echo, newest first. Details and measurements a
 - **"Spiel Queen auf Spotify" with Soloist too.** Soloist cannot search, so the Echo asks Spotify's Web API with an
   app of your own: create one at developer.spotify.com and give its Client ID and Client secret to "Search" on the
   Spotify card. The search finds public music; your private playlists it does not see.
+- **Spotify on the Echo Dot 2 too.** The same as on the Dot 3 (its software is the same generation); not yet tried on
+  a Dot 2: tell us how it goes.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 
