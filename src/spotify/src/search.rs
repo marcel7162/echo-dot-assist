@@ -66,6 +66,12 @@ pub fn url(kind: Kind, query: &str) -> String {
     format!("https://api.spotify.com/v1/search?q={q}&type={}&limit=5&market=from_token", kind.api())
 }
 
+/// The same for an app's own token (client credentials: no user, so no "from_token" market; Spotify then answers for
+/// every market, and Soloist plays what the account may)
+pub fn url_app(kind: Kind, query: &str) -> String {
+    url(kind, query).replace("&market=from_token", "")
+}
+
 /// Lower case letters and digits, one space between words, and what follows " - " or an opening bracket dropped:
 /// "Bohemian Rhapsody - Remastered 2011" and "bohemian rhapsody" are the same song to a listener
 pub fn norm(s: &str) -> String {

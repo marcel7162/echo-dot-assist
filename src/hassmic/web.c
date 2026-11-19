@@ -1255,6 +1255,17 @@ static void handle(int fd)
             int bad = spotify_set_key(kl ? (const char *)k : "");
             crypto_wipe(k, sizeof k); crypto_wipe(sealed, sizeof sealed);
             if (bad) { respond_sjson(fd, &r, 400, "{\"error\":\"not an API key\"}"); free(r.body); return; }
+        } else if (!strncmp(t, "webapi ", 7)) {
+            /* the owner's Web API app for searches: "<client id> <client secret>" sealed and padded as the key; "-" removes */
+            uint8_t sealed[130], k[131]; int kl = 0;
+            if (strcmp(t + 7, "-") && ((kl = unhex_any(sealed, sizeof sealed, t + 7)) <= 0 || unseal(&r, sealed, (size_t)kl, k))) {
+                respond_sjson(fd, &r, 400, "{\"error\":\"bad request\"}"); free(r.body); return;
+            }
+            k[kl] = 0;
+            char *sp = strchr((char *)k, ' ');
+            int bad = kl ? (!sp || (*sp = 0, spotify_set_webapi((char *)k, sp + 1))) : spotify_set_webapi("", "");
+            crypto_wipe(k, sizeof k); crypto_wipe(sealed, sizeof sealed);
+            if (bad) { respond_sjson(fd, &r, 400, "{\"error\":\"not a Client ID and Secret\"}"); free(r.body); return; }
         } else if (!strcmp(t, "logout")) spotify_logout();
         else if (!strncmp(t, "say ", 4)) {
             pthread_mutex_lock(&core_lock); int took = spotify_command(t + 4, ""); pthread_mutex_unlock(&core_lock);

@@ -422,7 +422,10 @@ No model `#ifdef`s in shared code: new differences become a board field, a `devi
   to 28936 by a bind() interposer, `_exit` when hassmic's pipe end goes (`make unit-hmpulse`); control by `soloist ctl
   -w 127.0.0.1:28937` (trace: state, track); the developer key `state/spotify/soloist.key` (0600, sealed from the page).
   Root's `main.sh` `soloist_prep`: `cp15_barrier` 2 (else Soloist spins in the kernel's emulation), `/system/etc`'s
-  resolv.conf and CA bundle linked into `run/`.  Search with Soloist: not yet (`fail nosearch`).  PC: `HASSMIC_SOLOIST_RUNTIME`; `HASSMIC_SPOTIFY` (the binary; tests: `tests/fake_spotify.py`), `HASSMIC_SPOT`
+  resolv.conf and CA bundle linked into `run/`.  Search with Soloist: the owner's Web API app (`webapi <sealed>` on the
+  page's POST, `state/spotify/webapi` "id\nsecret" 0600, `--webapi-file`): a client-credentials token, `/v1/search`
+  without a market (`search::url_app`), `search::pick`, `ctl activate` + `ctl play <uri>`; none: `fail nosearch`,
+  token refused: `fail webapi`.  PC: `HASSMIC_SOLOIST_RUNTIME`; `HASSMIC_SPOTIFY` (the binary; tests: `tests/fake_spotify.py`), `HASSMIC_SPOT`
   (its output file).  Builds byte for byte: paths remapped, SOURCE_DATE_EPOCH 0, VERGEN_IDEMPOTENT (content-id).
 - **Drop In** (`dropin.c`, `dropin.h`): calls between two Echos of the arbitration network. Signalling as signed
   `T_MSG` on arb's socket (`arb_tell`, `hooks->message`; invite/ringing/accept/refuse/bye), audio Opus 16 kHz 20 ms over

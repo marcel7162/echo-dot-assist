@@ -128,6 +128,17 @@ async def main(e):
     check(o2.get("--soloist-key-file") == kf and o2.get("--port") == "28936" and o2.get("--ws-port") == "28937" and o2.get("--runtime", "").endswith("rt")
           and o2.get("--dir", "").endswith("spotify/soloist"), f"  with the key's file, its ports and runtime ({o2})")
     check(await until(lambda: not os.path.exists(MDNS), 3) and sp()["engine"] == "soloist" and sp()["has_key"] == 1, "  no avahi record: Soloist announces itself")
+    def sealed_app(ctr): return b"webapi " + page.seal(ctr, b"abcdef0123456789abcd fedcba9876543210ffff".ljust(64, b"\0")).hex().encode()
+    n_sol = len(sol())
+    st, _, _ = page.call("POST", "/api/spotify", sealed_app)
+    wf = os.path.join(e.state, "spotify", "webapi")
+    check(st == 200 and open(wf).read() == "abcdef0123456789abcd\nfedcba9876543210ffff\n" and oct(os.stat(wf).st_mode & 0o777) == "0o600"
+          and sp()["has_webapi"] == 1, "the Web API app for searches: unsealed, kept 0600")
+    check(await until(lambda: len(sol()) > n_sol, 8) and "--webapi-file" in sol()[-1] and sol()[-1][sol()[-1].index("--webapi-file") + 1] == wf,
+          "  the speaker starts again with its file")
+    def sealed_bad(ctr): return b"webapi " + page.seal(ctr, b"only-one-word".ljust(64, b"\0")).hex().encode()
+    st, _, _ = page.call("POST", "/api/spotify", sealed_bad)
+    check(st == 400 and os.path.exists(wf), "  an ID without a secret is refused, the app kept")
     page.set(spotify_engine="librespot")
     check(await until(lambda: os.path.exists(MDNS), 8), "back to librespot: announced by avahi again")
 

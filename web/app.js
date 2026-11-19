@@ -3024,7 +3024,8 @@ let spotCtl = null;
 const SPOT_FAIL = { nologin: 'not logged in: pick the Echo once in the Spotify app', notfound: 'Spotify found nothing for it',
   error: 'Spotify did not answer (its web API may be limiting this speaker)', notrunning: 'the speaker was not running',
   clock: 'the Echo\'s clock is not set yet (it comes from Home Assistant)',
-  nosearch: 'searching with Soloist is not there yet: "Spiel Spotify" and the app work' };
+  nosearch: 'searching with Soloist needs your Web API app: "Search" below',
+  webapi: 'Spotify refused the Web API app\'s Client ID and Secret: set them again under "Search"' };
 // why no session comes up (src/spotify/src/main.rs "error"); the page's words
 const SPOT_ERR = { clock: 'The Echo\'s clock is not set: it comes from Home Assistant once the Echo is connected to it',
   nokey: 'Soloist needs your API key: "Set key…" below',
@@ -3058,7 +3059,29 @@ async function spotSend(body, ok) {
 function spotifyCard(list) {
   const main = list.find((s) => s.name === 'spotify'), rest = list.filter((s) => s !== main);
   const acct = h('div', { class: 'row-val' }), acctBtns = h('span', { class: 'btns' });
-  const nameVal = h('div', { class: 'row-val' }), keyVal = h('div', { class: 'row-val' });
+  const nameVal = h('div', { class: 'row-val' }), keyVal = h('div', { class: 'row-val' }), waVal = h('div', { class: 'row-val' });
+  const sealSend = async (cmd, v, done) => {
+    try {
+      state.spotify = (await echo.call('POST', '/api/spotify', (ctr) => {
+        const t = enc.encode(v), b = new Uint8Array(Math.ceil((t.length + 1) / 64) * 64); b.set(t);   // padded: its length stays inside
+        return `${cmd} ${hex(seal(echo.k, ctr, b))}`;
+      })).json();
+      toast(done);
+    } catch (e) { toast(errText(e)); }
+    if (spotCtl) spotCtl.paint();
+  };
+  const waRow = infoRow('Search', 'Your own Web API app, for "Spiel Queen auf Spotify"',
+    'Soloist cannot search, so the Echo asks Spotify\'s Web API with an app of yours: in the Spotify for Developers dashboard (developer.spotify.com) create an app (any name, redirect URI e.g. http://127.0.0.1/, "Web API" ticked) and copy its Client ID and Client secret here. They are sent sealed for this Echo and kept on it; the page never shows them again. The search finds public music; your own private playlists it does not see.',
+    h('span', { class: 'btns' }, h('button', { onclick: async () => {
+      const re = /^[A-Za-z0-9]{16,100}$/, chk = (x) => re.test(x.trim()) ? null : 'That does not look like one (letters and digits)';
+      const id = await ask({ title: 'Web API app: Client ID', ok: 'Next', check: chk,
+        body: ['Your app in the Spotify for Developers dashboard, "Basic Information": the Client ID.'], input: { label: 'Client ID', value: '', max: 100 } });
+      if (id === null) return;
+      const secret = await ask({ title: 'Web API app: Client secret', ok: 'Save', check: chk,
+        body: ['The same app\'s Client secret ("View client secret"). The speaker starts again with it.'], input: { label: 'Client secret', value: '', max: 100 } });
+      if (secret === null) return;
+      sealSend('webapi', `${id.trim()} ${secret.trim()}`, 'Saved: searches go through your app');
+    } }, 'Set app…')), null, waVal);
   const keyRow = infoRow('Soloist API key', 'Lets Soloist play on this Echo', 'In the Spotify for Developers dashboard (developer.spotify.com, signed in with your Premium account), "Soloist API Key": make one and paste it here. It is sent sealed for this Echo and kept on it; the page never shows it again.',
     h('span', { class: 'btns' }, h('button', { onclick: async () => {
       const v = await ask({ title: 'Soloist API key', ok: 'Save', check: (x) => /^[\x21-\x7e]{8,200}$/.test(x) ? null : 'That does not look like a key',
@@ -3076,7 +3099,7 @@ function spotifyCard(list) {
   const tryIn = h('input', { type: 'text', id: 'spotify-try', placeholder: 'Spiel Queen auf Spotify' });
   const tried = h('p', { class: 'help' });
   const extra = h('div', { class: 'spot-extra' },
-    keyRow,
+    keyRow, waRow,
     h('div', { id: 'spotify-account' }, infoRow('Account', 'Who the speaker plays for, and what plays',
       'Open Spotify on a phone or computer in the same network as the Echo, tap the device icon (Spotify Connect) and pick this Echo by the name below: that logs it in with the account the app uses. Another account can take it over the same way. Log out forgets the login on the Echo; the Spotify app then shows it as a speaker to pick again.',
       acctBtns, null, acct)),
@@ -3110,6 +3133,8 @@ function spotifyCard(list) {
     nameVal.replaceChildren(sp.name || sp.default_name || '');
     keyRow.classList.toggle('hidden', sp.engine !== 'soloist');
     keyVal.replaceChildren(sp.has_key ? 'Set' : 'Not set yet');
+    waRow.classList.toggle('hidden', sp.engine !== 'soloist');
+    waVal.replaceChildren(sp.has_webapi ? 'Set' : 'Not set: searching by voice is off');
   } };
   const card = titled('Spotify', main ? settingRow(main) : null, extra);
   spotCtl.paint();

@@ -38,6 +38,75 @@ pub struct Opts {
     pub ws_port: u16,
     pub zc_port: u16,
     pub audio_fd: i32,
+    pub webapi: Option<(String, String)>,   // the owner's Web API app (client id, secret): searches; Soloist has none
+}
+
+/// `--webapi-file`: client id and secret, a line each (hassmic's state/spotify/webapi, 0600)
+pub fn webapi_read(p: &Path) -> Option<(String, String)> {
+    let t = std::fs::read_to_string(p).ok()?;
+    let mut l = t.lines().map(str::trim).filter(|l| !l.is_empty());
+    let (id, secret) = (l.next()?.to_string(), l.next()?.to_string());
+    Some((id, secret))
+}
+
+/// The app's token (client credentials), kept until a minute before it ends
+static TOKEN: Mutex<Option<(String, std::time::Instant)>> = Mutex::new(None);
+
+async fn app_token(id: &str, secret: &str) -> Result<String, String> {
+    if let Some((t, end)) = TOKEN.lock().unwrap().clone() {
+        if std::time::Instant::now() < end { return Ok(t); }
+    }
+    use base64::Engine;
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{id}:{secret}"));
+    let req = http::Request::post("https://accounts.spotify.com/api/token")
+        .header("Authorization", format!("Basic {basic}"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(Bytes::from_static(b"grant_type=client_credentials"))
+        .map_err(|e| e.to_string())?;
+    let body = http_body(req).await?;
+    let v: Value = serde_json::from_slice(&body).map_err(|_| "not JSON".to_string())?;
+    let Some(t) = v.get("access_token").and_then(Value::as_str) else {
+        return Err(format!("no token: {}", v.get("error").and_then(Value::as_str).unwrap_or("?")));
+    };
+    let secs = v.get("expires_in").and_then(Value::as_u64).unwrap_or(3600).saturating_sub(60);
+    *TOKEN.lock().unwrap() = Some((t.to_string(), std::time::Instant::now() + Duration::from_secs(secs)));
+    Ok(t.to_string())
+}
+
+async fn http_body(req: http::Request<Bytes>) -> Result<Bytes, String> {
+    let client = librespot_core::http_client::HttpClient::new(None);
+    tokio::time::timeout(Duration::from_secs(10), client.request_body(req)).await.map_err(|_| "no answer in 10 s".to_string())?.map_err(|e| e.to_string())
+}
+
+/// "search <kind> <words>": the app's token, Web API's search, the best match (search.rs), then Soloist plays it
+async fn find(o: Arc<Opts>, sh: Arc<Shared>, rest: String) {
+    let Some((id, secret)) = o.webapi.clone() else { emit("result search fail nosearch"); return };
+    if !sh.logged_in.load(Ordering::Relaxed) { emit("result search fail nologin"); return; }
+    let (kind, words) = rest.split_once(' ').unwrap_or(("any", rest.as_str()));
+    let (kind, words) = (crate::search::Kind::parse(kind).unwrap_or(crate::search::Kind::Any), words.trim().to_string());
+    if words.is_empty() { emit("result search fail notfound"); return; }
+    let mut v = None;
+    for _ in 0..2 {
+        let tok = match app_token(&id, &secret).await {
+            Ok(t) => t,
+            Err(e) => { log::warn!("Web API token: {e}"); emit("result search fail webapi"); return; }
+        };
+        let req = http::Request::get(crate::search::url_app(kind, &words)).header("Authorization", format!("Bearer {tok}")).body(Bytes::new()).unwrap();
+        match http_body(req).await {
+            Ok(b) => { v = serde_json::from_slice::<Value>(&b).ok(); break; }
+            // a token Spotify ended early: once more with a new one
+            Err(e) => { log::warn!("search \"{words}\": {e}"); *TOKEN.lock().unwrap() = None; }
+        }
+    }
+    let Some(v) = v else { emit("result search fail error"); return };
+    let Some(c) = crate::search::pick(&v, kind, &words) else {
+        log::info!("search \"{words}\" ({}): nothing", kind.name());
+        emit("result search fail notfound");
+        return;
+    };
+    log::info!("search \"{words}\" ({}): {} {}", kind.name(), c.kind.name(), c.uri);
+    let ok = tokio::task::spawn_blocking(move || { ctl(&o, &["activate"]); ctl(&o, &["play", &c.uri]) }).await.unwrap_or(false);
+    if ok { emit(&format!("result search ok {} {}", c.kind.name(), c.name.replace('\n', " "))) } else { emit("result search fail error") }
 }
 
 /// Soloist's pid, for the stdin thread to end it with us: left running it would hold its ports from the next start
@@ -364,7 +433,7 @@ pub async fn run(o: Opts, lines: &mut mpsc::UnboundedReceiver<String>) {
                                 if ctl(&o2, &["play", &uri]) { emit("result liked ok liked") } else { emit("result liked fail error") }
                             });
                         }
-                        "search" => emit("result search fail nosearch"),
+                        "search" => { tokio::spawn(find(o2, sh2, rest.to_string())); }
                         _ => log::warn!("unknown command {cmd}"),
                     }
                 }
@@ -424,6 +493,17 @@ mod tests {
         assert_eq!(trace_event(r#"1795085278772 {"type":"playback_changed","status":"paused"}"#), vec!["state paused".to_string()]);
         assert!(trace_event(r#"1795085270487 {"type":"auth_state","logged_in":true}"#).is_empty());
         assert!(trace_event("connected to ws://127.0.0.1:28937").is_empty());
+    }
+
+    #[test]
+    fn the_owners_app_for_searches() {
+        let d = std::env::temp_dir().join(format!("webapi-{}", std::process::id()));
+        std::fs::write(&d, "abc123\n  s3cr3t \n").unwrap();
+        assert_eq!(webapi_read(&d), Some(("abc123".into(), "s3cr3t".into())));
+        std::fs::write(&d, "abc123\n").unwrap();
+        assert_eq!(webapi_read(&d), None);
+        std::fs::remove_file(&d).unwrap();
+        assert!(!crate::search::url_app(crate::search::Kind::Any, "Queen").contains("market"));
     }
 
     #[test]

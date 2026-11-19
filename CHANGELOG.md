@@ -17,8 +17,10 @@ What changed for people using the Echo, newest first. Details and measurements a
   keys to every track: it logs in and plays nothing. "Spotify client" on the Spotify card now picks Spotify's own
   Soloist instead, the default. The Echo downloads it from Spotify by itself (Spotify does not let us ship it) and
   needs a free developer key from developer.spotify.com, entered once on the card ("Set key…"). It plays, pauses,
-  skips and follows the volume as before, the ring shows the app's volume steps, and "Spiel Spotify" works; searching
-  by voice ("Spiel Queen auf Spotify") comes later with Soloist.
+  skips and follows the volume as before, the ring shows the app's volume steps, and "Spiel Spotify" works.
+- **"Spiel Queen auf Spotify" with Soloist too.** Soloist cannot search, so the Echo asks Spotify's Web API with an
+  app of your own: create one at developer.spotify.com and give its Client ID and Client secret to "Search" on the
+  Spotify card. The search finds public music; your private playlists it does not see.
 
 ## 2026-11-18 — The language you speak, from the right time zone
 

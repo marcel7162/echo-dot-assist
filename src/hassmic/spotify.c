@@ -32,6 +32,7 @@
 #include "resample.h"
 #include "settings.h"
 #include "statefile.h"
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -128,6 +129,27 @@ int spotify_set_key(const char *k)
     if (n ? statefile_write(p, 0600, k, n) : (unlink(p) && errno != ENOENT ? -1 : 0)) return -1;
     atomic_store(&restart_now, 1);
     fprintf(stderr, "spotify: Soloist API key %s\n", n ? "saved" : "removed");
+    return 0;
+}
+
+/* The owner's Web API app (developer.spotify.com: Client ID and Secret) for searches with Soloist, which has no search
+ * of its own: "id\nsecret" in state/spotify/webapi (0600), hassmic-spotify gets its path */
+static void webapi_path(char *out, size_t cap) { snprintf(out, cap, "%s/spotify/webapi", state_dir()); }
+static int has_webapi(void) { char p[300]; webapi_path(p, sizeof p); struct stat st; return !stat(p, &st) && st.st_size > 0; }
+int spotify_set_webapi(const char *id, const char *secret)
+{
+    char p[300], d[300], t[300];
+    size_t a = strlen(id), b = strlen(secret);
+    if (a > 100 || b > 100 || !a != !b) return -1;
+    for (const char *s = id; *s; s++) if (!isalnum((unsigned char)*s)) return -1;
+    for (const char *s = secret; *s; s++) if (!isalnum((unsigned char)*s)) return -1;
+    dir_path(d, sizeof d); mkdir(d, 0700); webapi_path(p, sizeof p);
+    int n = snprintf(t, sizeof t, "%s\n%s\n", id, secret);
+    int r = a ? statefile_write(p, 0600, t, (size_t)n) : (unlink(p) && errno != ENOENT ? -1 : 0);
+    for (volatile char *v = t; v < t + sizeof t; v++) *v = 0;
+    if (r) return -1;
+    atomic_store(&restart_now, 1);
+    fprintf(stderr, "spotify: Web API app for searches %s\n", a ? "saved" : "removed");
     return 0;
 }
 
@@ -271,9 +293,9 @@ size_t spotify_status_json(char *out, size_t cap)
     return (size_t)snprintf(out, cap,
         "{\"present\":%d,\"enabled\":%d,\"running\":%d,\"ready\":%d,\"logged_in\":%d,\"user\":\"%s\",\"playing\":%d,"
         "\"title\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\",\"result\":\"%s\",\"result_age\":%lld,\"name\":\"%s\","
-        "\"default_name\":\"%s\",\"port\":%d,\"error\":\"%s\",\"engine\":\"%s\",\"soloist\":%d,\"has_key\":%d}",
+        "\"default_name\":\"%s\",\"port\":%d,\"error\":\"%s\",\"engine\":\"%s\",\"soloist\":%d,\"has_key\":%d,\"has_webapi\":%d}",
         spotify_present(), atomic_load(&enabled), run, rd, li, u, pl, t[0], t[1], t[2], r, age, nm, dn,
-        use_soloist() ? SOLOIST_ZC_PORT : SPOTIFY_PORT, e, use_soloist() ? "soloist" : "librespot", spotify_soloist_present(), has_key());
+        use_soloist() ? SOLOIST_ZC_PORT : SPOTIFY_PORT, e, use_soloist() ? "soloist" : "librespot", spotify_soloist_present(), has_key(), has_webapi());
 }
 
 /* ---------------------------------------------------------------- mDNS */
@@ -351,15 +373,15 @@ static int spawn(int *in_w, int *out_r, int *aud_r)
     pthread_mutex_lock(&core_lock); int v = core_volume(); pthread_mutex_unlock(&core_lock);
     snprintf(vol, sizeof vol, "%d", v); snprintf(br, sizeof br, "%s", spotify_bitrates[atomic_load(&bitrate)]);
     int sol = use_soloist();
-    char port[8], wsp[8], rt[PATH_MAX], key[300];
+    char port[8], wsp[8], rt[PATH_MAX], key[300], wa[300];
     snprintf(port, sizeof port, "%d", sol ? SOLOIST_ZC_PORT : SPOTIFY_PORT); snprintf(wsp, sizeof wsp, "%d", SOLOIST_WS_PORT);
-    runtime_dir(rt, sizeof rt); key_path(key, sizeof key);
+    runtime_dir(rt, sizeof rt); key_path(key, sizeof key); webapi_path(wa, sizeof wa);
     if (sol) { strncat(dir, "/soloist", sizeof dir - strlen(dir) - 1); mkdir(dir, 0700); }
     const char *b = bin();
     char *argv[] = { (char *)b, "--name", nm, "--dir", dir, "--port", port, "--device-id", did, "--bitrate", br,
                      "--normalise", atomic_load(&normalise) ? "1" : "0", "--volume", vol, "--audio-fd", "3",
                      "--engine", sol ? "soloist" : "librespot", "--runtime", getenv("HASSMIC_SOLOIST_RUNTIME") ? getenv("HASSMIC_SOLOIST_RUNTIME") : rt,
-                     "--soloist-key-file", key, "--ws-port", wsp, NULL };
+                     "--soloist-key-file", key, "--ws-port", wsp, "--webapi-file", wa, NULL };
     if (pipe2(pin, O_CLOEXEC)) return -1;
     if (pipe2(pout, O_CLOEXEC)) { close(pin[0]); close(pin[1]); return -1; }
     if (pipe2(paud, O_CLOEXEC)) { close(pin[0]); close(pin[1]); close(pout[0]); close(pout[1]); return -1; }

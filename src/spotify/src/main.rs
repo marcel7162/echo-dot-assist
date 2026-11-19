@@ -68,11 +68,13 @@ struct Args {
     runtime: PathBuf,                   // soloist: the folder with glibc and libpulse.so.0 (hassmic's own)
     soloist_key_file: PathBuf,          // soloist: the developer API key, a file (not in this process's command line)
     ws_port: u16,
+    webapi_file: PathBuf,               // soloist: the owner's Web API app for searches, "client id\nclient secret"
 }
 
 fn args() -> Args {
     let mut a = Args { name: "Echo".into(), dir: PathBuf::from("."), port: 28933, device_id: String::new(), bitrate: Bitrate::Bitrate160, normalise: true, volume: 50, audio_fd: 3,
-                       engine: "librespot".into(), runtime: PathBuf::from("."), soloist_key_file: PathBuf::new(), ws_port: 28937 };
+                       engine: "librespot".into(), runtime: PathBuf::from("."), soloist_key_file: PathBuf::new(), ws_port: 28937,
+                       webapi_file: PathBuf::new() };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let v = it.next().unwrap_or_default();
@@ -89,6 +91,7 @@ fn args() -> Args {
             "--runtime" => a.runtime = PathBuf::from(v),
             "--soloist-key-file" => a.soloist_key_file = PathBuf::from(v),
             "--ws-port" => a.ws_port = v.parse().unwrap_or(a.ws_port),
+            "--webapi-file" => a.webapi_file = PathBuf::from(v),
             _ => eprintln!("spotify: unknown option {k}"),
         }
     }
@@ -221,7 +224,8 @@ async fn main() {
     if a.engine == "soloist" {
         let key = std::fs::read_to_string(&a.soloist_key_file).map(|k| k.trim().to_string()).unwrap_or_default();
         let o = soloist::Opts { runtime: a.runtime.clone(), dir: a.dir.clone(), key, name: a.name.clone(), volume: a.volume,
-                                ws_port: a.ws_port, zc_port: a.port, audio_fd: a.audio_fd };
+                                ws_port: a.ws_port, zc_port: a.port, audio_fd: a.audio_fd,
+                                    webapi: soloist::webapi_read(&a.webapi_file) };
         let mut lines = stdin_lines();
         soloist::run(o, &mut lines).await;
         soloist::end_child();

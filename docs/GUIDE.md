@@ -726,7 +726,14 @@ runs it beside hassmic, which plays its sound and keeps its volume, buttons and 
 Soloist needs a developer key: log in at developer.spotify.com, create an app with "Soloist" access, copy its key and
 give it to the card's "Set key…" (it travels encrypted and stays on the Echo). Then pick the Echo in the Spotify app
 as above; Soloist announces itself on the network. With Soloist, "Spiel Spotify", the liked songs, "Nächstes Lied"
-and "Pause" work; searching by voice does not yet (the falling two-tone, and the card says so).
+and "Pause" work as with librespot.
+
+Soloist cannot search, so for "Spiel Queen auf Spotify" the Echo asks Spotify's Web API itself, with an app of yours:
+in the dashboard at developer.spotify.com create an app (any name, a redirect URI such as `http://127.0.0.1/`, "Web
+API" ticked), open its settings and give its **Client ID** and **Client secret** to "Search" → "Set app…" on the
+card (sealed on the way, kept on the Echo). The Echo then searches as that app, not as your account: it finds public
+artists, albums, songs and playlists, not your private playlists, and Soloist plays the match on your account.
+Without the app, a search plays the falling two-tone and the card says what is missing.
 
 ### Even volume steps
 

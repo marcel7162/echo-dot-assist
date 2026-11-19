@@ -19,7 +19,8 @@ extern const char *const spotify_bitrates[3];   /* "96", "160", "320" (kbit/s) *
 int  spotify_engine(int set);           /* index into spotify_engines: Soloist (0) where its runtime is here, librespot */
 extern const char *const spotify_engines[2];
 int  spotify_soloist_present(void);     /* Soloist's runtime came with this build (libpulse.so.0 next to the speaker) */
-int  spotify_set_key(const char *key);  /* Soloist's developer API key (state/spotify/soloist.key, 0600); "" removes it */
+int  spotify_set_key(const char *key);
+int  spotify_set_webapi(const char *id, const char *secret);   /* searches with Soloist (state/spotify/webapi, 0600); "" "" removes */  /* Soloist's developer API key (state/spotify/soloist.key, 0600); "" removes it */
 
 /* Lock held (core_lock): the core's hooks */
 void spotify_volume_changed(int v);     /* the Echo's music volume moved (keys, Home Assistant): the app's slider follows */
